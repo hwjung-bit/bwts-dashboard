@@ -15,6 +15,9 @@ export default function StatusCards({ vessels }) {
     if (s in counts) counts[s]++;
     else counts.NO_DATA++;
   });
+  // 수신 = PDF 있는 선박 전체 (RECEIVED + 분석완료 상태 모두 포함)
+  counts.RECEIVED = counts.RECEIVED + counts.NORMAL + counts.WARNING + counts.CRITICAL + counts.REVIEWED;
+  // 미수신 = NO_DATA 그대로
 
   return (
     <div className="grid grid-cols-3 md:grid-cols-6 gap-3 mb-6">
