@@ -1,8 +1,10 @@
 // ============================================================
 //  geminiService.js
-//  Gemini 2.5 Flash API를 통한 BWTS 로그 PDF 자동 분석
+//  Gemini 2.5 Flash API를 통한 BWTS 로그 PDF 자동 분析
 //
-//  [방식] Google Drive File URI → Gemini에 직접 전달
+//  [방식] 2단계 파이프라인:
+//    Stage 1 — PDF 첨부, 데이터 추출 전용 (해석/판단 없음)
+//    Stage 2 — JSON 입력, 분析/판정/remarks 생성 (PDF 없음)
 //  [응답] JSON 강제 파싱 (최대 3회 재시도)
 // ============================================================
 
@@ -10,9 +12,8 @@ import { CONFIG } from "../config.js";
 
 const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${CONFIG.GEMINI_MODEL}:generateContent`;
 
-// ── JSON 출력 스키마 ─────────────────────────────────────────
-const EXTRACTION_SCHEMA = `
-{
+// ── Stage 1 추출 스키마 (텍스트 — 프롬프트에 포함) ────────────
+const STAGE1_TEXT_SCHEMA = `{
   "vessel_name": "선박명",
   "imo_number": "IMO 번호 (없으면 null)",
   "period": "분석 기간 (YYYY-MM)",
@@ -30,8 +31,8 @@ const EXTRACTION_SCHEMA = `
     }
   ],
   "tro_data": {
-    "ballasting_avg": "주입(Ballasting) 안정 구간 평균 TRO (ppm) — 운전 시작 후 10분·종료 전 10분 데이터 제외한 중간 구간만 평균. 해당 구간 없으면 null",
-    "deballasting_avg": "배출(De-ballasting) 안정 구간 평균 TRO (ppm) — 운전 시작 후 10분·종료 전 10분 데이터 제외한 중간 구간만 평균. 해당 구간 없으면 null"
+    "ballasting_avg": "주입(Ballasting) 안정 구간 평균 TRO (ppm) — 운전 시작 후 10분·종료 전 10분 제외. 해당 구간 없으면 null",
+    "deballasting_avg": "배출(De-ballasting) 안정 구간 평균 TRO (ppm) — 운전 시작 후 10분·종료 전 10분 제외. 해당 구간 없으면 null"
   },
   "sensor_data": {
     "gds_max": "수소가스 최대값 (% LEL, 없으면 null)",
@@ -52,29 +53,60 @@ const EXTRACTION_SCHEMA = `
         "location_gps": "발생 당시 GPS (없으면 null)"
       }
     }
-  ],
-  "overall_status": "NORMAL 또는 WARNING 또는 CRITICAL",
-  "ai_remarks": "장비 상태 요약 (2~4문장, 한국어, 반드시 수치 포함)",
-  "ai_remarks_en": "Equipment status summary (2~4 sentences, English, must include specific numbers)"
+  ]
 }`;
 
-// ── 분석 프롬프트 (선박 정보 동적 주입) ─────────────────────
-const ANALYSIS_PROMPT = (vessel = {}) => `
-당신은 테크로스(Techcross) 선박평형수처리장치(BWTS) 로그 데이터를 분석하는 전문가입니다.
-첨부된 PDF(DataReport, EventLogReport, OperationTimeReport, GeneralReport 등)를 분석하여 아래 JSON 형식으로만 응답하세요.
-JSON 외의 텍스트는 일절 포함하지 마세요. JSON 외의 내용이 있으면 파싱에 실패합니다.
+// ── Gemini responseSchema (API 레벨 포맷 강제) ───────────────
+// Stage 1: 데이터 추출 결과
+const STAGE1_RESPONSE_SCHEMA = {
+  type: "object",
+  properties: {
+    vessel_name:  { type: "string" },
+    imo_number:   { type: "string", nullable: true },
+    period:       { type: "string" },
+    manufacturer: { type: "string" },
+    operations:   { type: "array",  items: { type: "object" } },
+    tro_data:     {
+      type: "object",
+      properties: {
+        ballasting_avg:   { type: "number", nullable: true },
+        deballasting_avg: { type: "number", nullable: true },
+      },
+    },
+    error_alarms: { type: "array", items: { type: "object" } },
+  },
+  required: ["operations", "error_alarms"],
+};
+
+// Stage 2: 분析 판정 결과 (overall_status enum 강제)
+const STAGE2_RESPONSE_SCHEMA = {
+  type: "object",
+  properties: {
+    overall_status: { type: "string", enum: ["NORMAL", "WARNING", "CRITICAL"] },
+    ai_remarks:     { type: "string" },
+    ai_remarks_en:  { type: "string" },
+  },
+  required: ["overall_status", "ai_remarks", "ai_remarks_en"],
+};
+
+// ── Stage 1: 데이터 추출 전용 프롬프트 ──────────────────────
+const EXTRACTION_PROMPT = (vessel = {}) => `
+당신은 선박평형수처리장치(BWTS) 로그 PDF 데이터 추출 전문가입니다.
+첨부된 PDF에서 데이터를 정확히 추출하세요.
+숫자·날짜·코드만 있는 그대로 추출하세요. 해석하거나 판단하지 마세요.
+JSON 외의 텍스트는 절대 포함하지 마세요.
 
 [데이터 파싱 방법]
 - PDF에서 추출된 텍스트는 표(Table) 형식이 깨져 값, 값 형태로 나열될 수 있음
 - 줄바꿈과 콤마를 기준으로 열(Column)과 행(Row)을 지능적으로 복원해서 읽을 것
-- 'Report', 'Log'가 이름에 포함된 파일의 데이터를 우선 읽고, 매뉴얼/도면 파일은 참조 수준으로만 활용
+- 'Report', 'Log'가 이름에 포함된 파일의 데이터를 우선 읽고, 매뉴얼/도면 파일은 무시
 
 [장비 정보]
 - 선명: ${vessel.name || "미상"}
 - BWTS 제조사: ${vessel.manufacturer || "Techcross"}
 - BWTS 모델: ${vessel.model || "ECS"}
 
-[4단계 파싱 절차]
+[4단계 추출 절차]
 
 Step 1. GeneralReport (또는 헤더)
 - 선명, IMO 번호, 제조사, 분析 기간 추출
@@ -93,15 +125,13 @@ Step 3. EventLogReport — 이벤트 로그 파싱
 - 최대 60건으로 제한
 
 [반복 이벤트 처리]
-- 동일 code가 많이 반복되면: 처음 3건 + 마지막 1건만 추출, 나머지 건너뜀
-- Trip 이벤트는 예외 — 전부 추출
+- Trip 이벤트는 무조건 전부 추출
+- 그 외(Warning/Alarm)는 동일 코드당 발생 시간순으로 최대 5건까지만 추출, 나머지 무시
 - EventLog가 방대한 경우 DataReport·OperationTimeReport·GeneralReport 파싱에 토큰 집중
 
 Step 4. DataReport (TRO 평균 계산 + 센서 매칭)
 
 [TRO 평균 계산 — 핵심 규칙]
-DataReport에서 각 운전(BALLAST/DEBALLAST)의 TRO 평균을 계산할 때:
-
 ① OperationTimeReport에서 각 운전의 정확한 시작시간·종료시간 확인
 ② DataReport에서 해당 운전 시간 범위의 TRO 행을 추출
 ③ 아래 구간은 반드시 제외 (배관 잔류수 영향으로 TRO 값이 부정확):
@@ -111,9 +141,31 @@ DataReport에서 각 운전(BALLAST/DEBALLAST)의 TRO 평균을 계산할 때:
 ⑤ 안정 구간 데이터가 없거나(운전시간 20분 이하) 데이터가 0개면 → null
 
 [센서 매칭 (알람 발생 시점)]
-- Step 3의 알람 발생 시각 기준 ±5분 이내 DataReport 행에서 sensor 값 추출
+- 알람 발생 시각 기준 ±5분 이내 DataReport 행에서 sensor 값 추출
 - 여러 행이 있으면 알람 시각에 가장 가까운 1개 행만 선택
-- ±5분 내 데이터 없으면 해당 필드 null
+- ±5분 내 데이터 없으면 ±15분 이내에서 가장 가까운 1개 추출
+- ±15분도 없으면 해당 필드 null
+
+[확인 불가 항목은 null로 표시]
+[문자열 값에 줄바꿈 문자 포함 금지]
+
+${STAGE1_TEXT_SCHEMA}
+`.trim();
+
+// ── Stage 2: 분析 판정 전용 프롬프트 ────────────────────────
+const ANALYSIS_PROMPT = (vessel = {}, extractedData = {}) => `
+당신은 테크로스(Techcross) 선박평형수처리장치(BWTS) 전문가입니다.
+아래 추출된 데이터를 분析하여 판정 및 요약을 JSON으로만 작성하세요.
+JSON 외의 텍스트는 절대 포함하지 마세요.
+
+[선박 정보]
+- 선명: ${vessel.name || extractedData.vessel_name || "미상"}
+- BWTS 제조사: ${vessel.manufacturer || extractedData.manufacturer || "Techcross"}
+- BWTS 모델: ${vessel.model || "ECS"}
+- 분析 기간: ${extractedData.period || "미상"}
+
+[추출된 데이터]
+${JSON.stringify(extractedData, null, 2)}
 
 [overall_status 판별 기준]
 
@@ -122,7 +174,6 @@ NORMAL (모두 해당 시):
 - 동일 코드 알람 2건 이하
 - TRO 주입(Ballasting) 안정 구간 평균 5~10ppm 유지
 - TRO 배출(De-ballasting) 안정 구간 평균 0.1ppm 미만(IMO 기준)
-  ※ 안정 구간 = 운전 시작 후 10분 ~ 종료 전 10분 (Step 4 계산 기준과 동일)
 - 데이터 일부 누락(null)은 NORMAL 판정에 영향 없음
 
 WARNING:
@@ -149,10 +200,9 @@ CRITICAL (하나라도 해당):
 
 [주의사항]
 - 불확실한 경우 CRITICAL보다 WARNING/NORMAL 우선
-- 확인 불가 항목은 null
 - 문자열 값에 줄바꿈 문자 포함 금지 (한 줄로 작성)
 
-${EXTRACTION_SCHEMA}
+{"overall_status": "NORMAL 또는 WARNING 또는 CRITICAL", "ai_remarks": "...", "ai_remarks_en": "..."}
 `.trim();
 
 
@@ -359,7 +409,13 @@ function recalcOverallStatus(data) {
   // TRO 기준 위반 여부
   const troBallastBad   = tro.ballasting_avg   != null && (tro.ballasting_avg < 5 || tro.ballasting_avg > 10);
   const troDeballastBad = tro.deballasting_avg  != null && tro.deballasting_avg > 0.1;
-  const troAllNull      = tro.ballasting_avg    == null && tro.deballasting_avg == null;
+
+  // TRO null → 실제 운전이 있었을 때만 WARNING (운전 없는 달은 제외)
+  const ops         = data.operations || [];
+  const hadBallast  = ops.some((o) => /BALLAST/i.test(o.operation_mode || "") && !/DE/i.test(o.operation_mode || ""));
+  const hadDeballast = ops.some((o) => /DEBALLAST/i.test(o.operation_mode || ""));
+  const troAllNull  = (hadBallast    && tro.ballasting_avg   == null)
+                   || (hadDeballast  && tro.deballasting_avg == null);
 
   if (tripCount >= 1 || maxRepeat >= 5 || troDeballastBad) {
     data.overall_status = "CRITICAL";
@@ -480,10 +536,17 @@ function fetchWithTimeout(url, options, timeoutMs = 300_000) {
   );
 }
 
-// ── 핵심 fetch 함수 ──────────────────────────────────────────
-async function callGemini(parts, retries = 3) {
+// ── Gemini 호출 (raw, 후처리 없음) ───────────────────────────
+async function callGeminiRaw(parts, retries = 3, schema = null) {
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
+      const generationConfig = {
+        responseMimeType: "application/json",
+        temperature: 0,
+        maxOutputTokens: 65536,
+      };
+      if (schema) generationConfig.responseSchema = schema;
+
       const res = await fetchWithTimeout(
         `${GEMINI_ENDPOINT}?key=${CONFIG.GEMINI_API_KEY}`,
         {
@@ -491,11 +554,7 @@ async function callGemini(parts, retries = 3) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             contents: [{ parts }],
-            generationConfig: {
-              responseMimeType: "application/json",
-              temperature: 0.1,
-              maxOutputTokens: 65536,
-            },
+            generationConfig,
           }),
         },
         300_000 // 5분 타임아웃
@@ -512,7 +571,7 @@ async function callGemini(parts, retries = 3) {
       const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
       if (!text) throw new Error("Gemini 응답에 텍스트가 없습니다.");
 
-      return validateAndNormalizeResult(robustJsonParse(text));
+      return robustJsonParse(text);
     } catch (err) {
       // 페이지/토큰 초과만 재시도 불필요 (타임아웃·500·파싱오류는 재시도)
       const noRetry = err.message.includes("exceeds");
@@ -526,9 +585,17 @@ async function callGemini(parts, retries = 3) {
   }
 }
 
+// ── Gemini 호출 + 후처리 정규화 ─────────────────────────────
+async function callGemini(parts, retries = 3) {
+  const raw = await callGeminiRaw(parts, retries);
+  return validateAndNormalizeResult(raw);
+}
+
 /**
- * Google Drive PDF → Gemini Files API 업로드 후 분석
- * - fileUri 참조 방식: base64 인라인 대비 요청 크기 최소화
+ * Google Drive PDF → Gemini Files API 업로드 후 분析
+ * - 2단계 파이프라인:
+ *   Stage 1 — PDF 첨부, 데이터 추출 전용 (해석/판단 없음)
+ *   Stage 2 — JSON 입력, 분析/판정/remarks 생성 (PDF 없음)
  * - 세션 캐시: 같은 파일은 재업로드 없이 URI 재사용 (47시간)
  */
 
@@ -603,13 +670,13 @@ export async function analyzePdfFromDrive(fileIds, accessToken, vessel = {}) {
   // 1. 파일들을 Gemini Files API에 업로드 (캐시 활용, 병렬)
   const uris = await Promise.all(ids.map((id) => getOrUploadFileUri(id, accessToken)));
 
-  // 2. fileUri 참조 방식으로 parts 구성 (선박 정보 포함)
-  const makeParts = (uriList) => [
-    { text: ANALYSIS_PROMPT(vessel) },
+  // 2. Stage 1 parts 구성 (추출 전용, PDF 첨부)
+  const makeExtractionParts = (uriList) => [
+    { text: EXTRACTION_PROMPT(vessel) },
     ...uriList.map((uri) => ({ fileData: { mimeType: "application/pdf", fileUri: uri } })),
   ];
 
-  // 3. 전체 시도 → 실패 시 개별 시도 fallback
+  // 3. 전체 실패 시 개별 시도 fallback 조건
   const shouldFallback = (e) =>
     uris.length > 1 && (
       e.message.includes("exceeds") ||
@@ -619,21 +686,37 @@ export async function analyzePdfFromDrive(fileIds, accessToken, vessel = {}) {
       e.message.includes("aborted")
     );
 
+  // Stage 1: 데이터 추출 (PDF 첨부)
+  let extracted;
   try {
-    return await callGemini(makeParts(uris));
+    extracted = await callGeminiRaw(makeExtractionParts(uris), 3, STAGE1_RESPONSE_SCHEMA);
   } catch (err) {
     if (!shouldFallback(err)) throw err;
-    console.warn("전체 묶음 실패, 개별 분석 시도...", err.message);
+    console.warn("Stage 1 전체 묶음 실패, 개별 시도...", err.message);
     for (const uri of uris) {
       try {
-        return await callGemini(makeParts([uri]));
+        extracted = await callGeminiRaw(makeExtractionParts([uri]), 3, STAGE1_RESPONSE_SCHEMA);
+        break;
       } catch (innerErr) {
-        console.warn("개별 실패, 다음...", innerErr.message);
+        console.warn("Stage 1 개별 실패, 다음...", innerErr.message);
         if (!innerErr.message.includes("exceeds")) throw innerErr;
       }
     }
-    throw new Error("모든 PDF 분析 실패. 파일 크기 초과 또는 Gemini 서버 오류.");
+    if (!extracted) throw new Error("Stage 1: 모든 PDF 분析 실패.");
   }
+
+  // Stage 2: 분析/판정/remarks (JSON만, PDF 없음)
+  const analysisParts = [{ text: ANALYSIS_PROMPT(vessel, extracted) }];
+  let analyzed;
+  try {
+    analyzed = await callGeminiRaw(analysisParts, 3, STAGE2_RESPONSE_SCHEMA);
+  } catch (err) {
+    console.warn("Stage 2 실패, 기본값으로 후처리 진행:", err.message);
+    analyzed = { overall_status: null, ai_remarks: "", ai_remarks_en: "" };
+  }
+
+  // Stage 1 + Stage 2 결합 후 후처리
+  return validateAndNormalizeResult({ ...extracted, ...analyzed });
 }
 
 /**

@@ -22,12 +22,12 @@ function loadMonthlyData(year, month) {
     const raw = localStorage.getItem(`bwts_monthly_${year}_${month}`);
     if (!raw) return {};
     const data = JSON.parse(raw);
-    // 분析 도중 중단된 LOADING 상태 → RECEIVED로 자동 복구
+    // 분석 도중 중단된 LOADING 상태 → RECEIVED로 자동 복구
     let needSave = false;
     for (const id of Object.keys(data)) {
       if (data[id]?.analysisStatus === "LOADING") {
         data[id].analysisStatus = "RECEIVED";
-        data[id].analysisError = "분析이 중단되었습니다. 재분석을 눌러주세요.";
+        data[id].analysisError = "분석이 중단되었습니다. 재분석을 눌러주세요.";
         needSave = true;
       }
     }
@@ -47,9 +47,15 @@ function saveMonthlyData(year, month, data) {
  * - 매뉴얼·도면·인증서 등 명백한 비로그 파일만 제외 (관대한 필터)
  * - fallback: 전체 반환
  */
+const MAX_PDF_BYTES = 30 * 1024 * 1024; // 30MB 초과 제외
+
 function filterLogPdfs(pdfs) {
   const EXCLUDE_PATTERNS = /manual|drawing|certificate|photo|image|install|setup/i;
-  const filtered = pdfs.filter((p) => !EXCLUDE_PATTERNS.test(p.name || ""));
+  let filtered = pdfs.filter((p) =>
+    !EXCLUDE_PATTERNS.test(p.name || "") &&
+    (p.size == null || Number(p.size) <= MAX_PDF_BYTES)
+  );
+  filtered.sort((a, b) => (Number(a.size) || 0) - (Number(b.size) || 0));
   return filtered.length > 0 ? filtered : pdfs;
 }
 
@@ -250,7 +256,7 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
         })
       );
     } catch (err) {
-      setAnalyzeError(`분析 실패: ${err.message}`);
+      setAnalyzeError(`분석 실패: ${err.message}`);
     } finally {
       setAnalyzing(false);
       setAnalyzingNames([]);
@@ -260,7 +266,7 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
         let changed = false;
         for (const id of Object.keys(next)) {
           if (next[id]?.analysisStatus === "LOADING") {
-            next[id] = { ...next[id], analysisStatus: "RECEIVED", analysisError: "분析이 중단되었습니다." };
+            next[id] = { ...next[id], analysisStatus: "RECEIVED", analysisError: "분석이 중단되었습니다." };
             changed = true;
           }
         }
