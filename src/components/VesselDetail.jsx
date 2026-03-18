@@ -218,7 +218,19 @@ export default function VesselDetail({ vessel, onClose }) {
           {r?.ai_remarks && (
             <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
               <div className="text-xs text-blue-600 font-medium mb-2">🤖 AI 분석 요약</div>
-              <p className="text-sm text-slate-700 leading-relaxed">{r.ai_remarks}</p>
+              <div className="text-sm text-slate-700 leading-relaxed space-y-1">
+                {r.ai_remarks.split("\n").filter(Boolean).map((line, i) => {
+                  const isOps    = line.startsWith("[운전");
+                  const isAlarm  = line.startsWith("[알람");
+                  const isSummary= line.startsWith("[종합");
+                  const icon     = isOps ? "📋" : isAlarm ? "⚠️" : isSummary ? "💡" : null;
+                  return (
+                    <p key={i} className={`${isAlarm ? "text-amber-700" : isSummary ? "text-slate-800 font-medium" : ""}`}>
+                      {icon && <span className="mr-1">{icon}</span>}{line}
+                    </p>
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>

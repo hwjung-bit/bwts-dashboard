@@ -314,31 +314,42 @@ CRITICAL (하나라도 해당):
 - TRO 배출 기준 초과(0.1ppm 초과)가 연속 3회 이상 명백하게 발생
 
 [ai_remarks 작성 지침]
+반드시 아래 3줄 구조로 작성하고, 각 줄을 \n 로 구분하세요.
+
+1줄: [운전 현황] 주입 N회 / 배출 N회. 주입 TRO Xppm(정상 5~10ppm [충족/미달]). 배출 TRO Xppm(IMO 기준 [충족/초과]).
+2줄: [알람] 발생한 코드별로 "CODE×건수 — 조치" 형태로 나열. 알람 없으면 "이상 알람 없음."
+3줄: [종합] 핵심 문제 1~2줄 요약 및 권고사항.
+
 - 반드시 구체적 숫자 포함: 운전 횟수, TRO 평균값(ppm), 주요 알람 코드 및 발생 건수
-- 배출(De-ballasting) TRO가 0.00ppm에 가까운 것은 정상적인 중화 결과이므로 문제 삼지 말 것
+- 배출 TRO 0.00ppm에 가까운 것은 정상 중화 결과이므로 문제 삼지 말 것
 - 수치 없는 포괄적 서술 금지 ("전반적으로 정상", "문제없이 완료" 등)
-- GPS·위치·시간 등 부가 필드 누락 언급 금지. 전체 누락 비율(퍼센트) 계산 및 언급 금지.
-- TRO 데이터가 null(미수신)인 경우: "TRO 미수신 — DataReport 확인 필요." 한 줄만 추가.
+- GPS·위치·시간 등 부가 필드 누락 언급 금지. 전체 누락 비율 계산 및 언급 금지.
+- TRO 데이터가 null(미수신)인 경우 3줄 구조에서 1줄: "TRO 미수신 — DataReport 확인 필요."
 - 100% 한국어 작성 (BWTS, TRO, Alarm, Trip, Code 등 고유명사 제외)
-- 알람 발생 시 아래 코드별 조치 권고사항을 반드시 포함할 것:
-  * CODE200 (TRO Low): CLX 시약 상태 점검 및 샘플링 라인 확인 권장
-  * CODE201 (TRO High): 중화제(Sodium Thiosulfate) 주입 펌프 및 탱크 레벨 확인 권장
-  * CODE301/302/303 (ANU Tank Level): 중화제 탱크 레벨 센서 및 밸브 점검 권장
-  * CODE701 (Comm Fail): PLC 및 모듈 간 통신 케이블 연결 상태 확인 권장
-  * CODE721 (Valve Opened/Failed): 해당 밸브의 공압 상태 및 리미트 스위치 점검 권장
-  * VRCS_ERR (밸브 개폐 반복 오작동): 수 초 간격으로 밸브가 열림/닫힘을 반복한 채터링(Chattering) 현상 감지. 공압 라인 불량 또는 밸브 리미트 스위치 접점 불량/VRCS 통신 오류가 강력히 의심됨. [긴급] 즉각적인 해당 밸브 하드웨어 점검 및 수리를 강력 권고.
-  * LOG_OVERFLOW (Event Log 100건 초과): 이벤트 로그가 비정상적으로 과다하게 발생했음. 반복성 알람 또는 밸브 오작동이 지속되고 있을 가능성이 높으므로 전체 로그 상세 검토 및 원인 파악 권고. overall_status는 최소 WARNING으로 판정.
-- 예시: "당월 주입 3회/배출 2회 운전. 주입 평균 TRO 6.2ppm으로 정상 범위(5~10ppm) 내 유지. CODE200(TRO 저하) Alarm 3건 발생 — CLX 시약 상태 확인 권장."
+- 알람 코드별 조치 권고:
+  * CODE200: CLX 시약 상태 점검 및 샘플링 라인 확인
+  * CODE201: 중화제(STS) 주입 펌프 및 탱크 레벨 확인
+  * CODE301/302/303: 중화제 탱크 레벨 센서 및 밸브 점검
+  * CODE701: PLC 및 모듈 간 통신 케이블 연결 상태 확인
+  * CODE721: 해당 밸브 공압 상태 및 리미트 스위치 점검
+  * VRCS_ERR: 밸브 채터링(Chattering) 감지 — [긴급] 공압 라인·리미트 스위치 즉각 점검
+  * LOG_OVERFLOW: Event Log 100건 초과 — 전체 로그 상세 검토 권고
+
+예시:
+[운전 현황] 주입 3회 / 배출 2회. 주입 TRO 6.2ppm(정상 충족). 배출 TRO 0.02ppm(IMO 기준 충족).
+[알람] CODE200×3 — CLX 시약 상태 점검 권장.
+[종합] 전반적으로 정상 운전. CLX 시약 상태 모니터링 지속 권장.
 
 [ai_remarks_en 작성 지침]
-- ai_remarks와 동일한 내용을 영어로 작성 (본선 발송 이메일용)
-- Must include specific numbers: operation count, TRO average (ppm), alarm code counts
-- VRCS_ERR example: "Valve chattering detected on [valve name] — strongly recommend immediate hardware inspection of pneumatic line and limit switch."
-- Example: "3 ballasting / 2 deballasting operations this month. Average TRO 6.2ppm within normal range (5~10ppm). CODE200 (TRO Low) Alarm×3 — recommend checking CLX reagent condition."
+- ai_remarks와 동일한 3줄 구조를 영어로 작성 (본선 발송 이메일용)
+- 줄 구분은 동일하게 \n 사용
+- Example:
+[Operations] 3 ballasting / 2 deballasting. Avg TRO 6.2ppm (within 5~10ppm range). Deballasting TRO 0.02ppm (IMO compliant).
+[Alarms] CODE200×3 — recommend checking CLX reagent and sampling line.
+[Summary] Overall normal operation. Continue monitoring CLX reagent condition.
 
 [주의사항]
 - 불확실한 경우 CRITICAL보다 WARNING/NORMAL 우선
-- 문자열 값에 줄바꿈 문자 포함 금지 (한 줄로 작성)
 - 출력 JSON은 반드시 아래 3개 키만 포함하고 다른 키는 절대 추가하지 마세요.
 
 {"overall_status": "NORMAL 또는 WARNING 또는 CRITICAL", "ai_remarks": "...", "ai_remarks_en": "..."}
