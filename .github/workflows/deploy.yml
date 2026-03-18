@@ -1,0 +1,58 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # config.js는 .gitignore 처리 → Secrets에서 자동 생성
+      - name: Create config.js from GitHub Secrets
+        run: |
+          cat > src/config.js << 'EOF'
+          export const CONFIG = {
+            GOOGLE_CLIENT_ID: "${{ secrets.GOOGLE_CLIENT_ID }}",
+            GEMINI_API_KEY: "${{ secrets.GEMINI_API_KEY }}",
+            DRIVE_ROOT_FOLDER_ID: "${{ secrets.DRIVE_ROOT_FOLDER_ID }}",
+            SCOPES: "https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/gmail.send",
+            GEMINI_MODEL: "gemini-2.5-flash",
+            ADMIN_EMAIL: "${{ secrets.ADMIN_EMAIL }}",
+          };
+          export { INITIAL_VESSELS, STATUS_CONFIG, mapOverallStatus } from "./config.static.js";
+          EOF
+
+      - name: Build
+        run: npm run build
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

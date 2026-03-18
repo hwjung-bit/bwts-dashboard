@@ -1,0 +1,651 @@
+// ============================================================
+//  geminiService.js
+//  Gemini 2.5 Flash API를 통한 BWTS 로그 PDF 자동 분석
+//
+//  [방식] Google Drive File URI → Gemini에 직접 전달
+//  [응답] JSON 강제 파싱 (최대 3회 재시도)
+// ============================================================
+
+import { CONFIG } from "../config.js";
+
+const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${CONFIG.GEMINI_MODEL}:generateContent`;
+
+// ── JSON 출력 스키마 ─────────────────────────────────────────
+const EXTRACTION_SCHEMA = `
+{
+  "vessel_name": "선박명",
+  "imo_number": "IMO 번호 (없으면 null)",
+  "period": "분석 기간 (YYYY-MM)",
+  "manufacturer": "BWTS 제조사",
+  "operations": [
+    {
+      "date": "날짜 (YYYY-MM-DD)",
+      "operation_mode": "BALLAST 또는 DEBALLAST 또는 STRIPPING",
+      "start_time": "시작 시간 (HH:MM, 없으면 null)",
+      "end_time": "종료 시간 (HH:MM, 없으면 null)",
+      "ballast_volume": "주입량 (m³, 없으면 null)",
+      "deballast_volume": "배출량 (m³, 없으면 null)",
+      "run_time": "운전 시간 (hour, 없으면 null)",
+      "location_gps": "GPS 위치 (없으면 null)"
+    }
+  ],
+  "tro_data": {
+    "ballasting_avg": "주입(Ballasting) 안정 구간 평균 TRO (ppm) — 운전 시작 후 10분·종료 전 10분 데이터 제외한 중간 구간만 평균. 해당 구간 없으면 null",
+    "deballasting_avg": "배출(De-ballasting) 안정 구간 평균 TRO (ppm) — 운전 시작 후 10분·종료 전 10분 데이터 제외한 중간 구간만 평균. 해당 구간 없으면 null"
+  },
+  "sensor_data": {
+    "gds_max": "수소가스 최대값 (% LEL, 없으면 null)",
+    "csu_avg": "해수 전도도 평균 (mS/cm, 없으면 null)",
+    "fts_max": "냉각수 온도 최대값 (°C, 없으면 null)"
+  },
+  "error_alarms": [
+    {
+      "code": "에러 코드",
+      "description": "에러 내용",
+      "level": "Alarm 또는 Trip 또는 Warning",
+      "date": "발생 날짜 (YYYY-MM-DD 또는 null)",
+      "time": "발생 시간 (HH:MM 또는 null)",
+      "sensor_at_event": {
+        "rec_voltage": "발생 당시 정류기 전압 (V, 없으면 null)",
+        "rec_current": "발생 당시 정류기 전류 (A, 없으면 null)",
+        "tro": "발생 당시 TRO 값 (ppm, 없으면 null)",
+        "location_gps": "발생 당시 GPS (없으면 null)"
+      }
+    }
+  ],
+  "overall_status": "NORMAL 또는 WARNING 또는 CRITICAL",
+  "ai_remarks": "장비 상태 요약 (2~4문장, 한국어, 반드시 수치 포함)",
+  "ai_remarks_en": "Equipment status summary (2~4 sentences, English, must include specific numbers)"
+}`;
+
+// ── 분석 프롬프트 (선박 정보 동적 주입) ─────────────────────
+const ANALYSIS_PROMPT = (vessel = {}) => `
+당신은 테크로스(Techcross) 선박평형수처리장치(BWTS) 로그 데이터를 분석하는 전문가입니다.
+첨부된 PDF(DataReport, EventLogReport, OperationTimeReport, GeneralReport 등)를 분석하여 아래 JSON 형식으로만 응답하세요.
+JSON 외의 텍스트는 일절 포함하지 마세요. JSON 외의 내용이 있으면 파싱에 실패합니다.
+
+[데이터 파싱 방법]
+- PDF에서 추출된 텍스트는 표(Table) 형식이 깨져 값, 값 형태로 나열될 수 있음
+- 줄바꿈과 콤마를 기준으로 열(Column)과 행(Row)을 지능적으로 복원해서 읽을 것
+- 'Report', 'Log'가 이름에 포함된 파일의 데이터를 우선 읽고, 매뉴얼/도면 파일은 참조 수준으로만 활용
+
+[장비 정보]
+- 선명: ${vessel.name || "미상"}
+- BWTS 제조사: ${vessel.manufacturer || "Techcross"}
+- BWTS 모델: ${vessel.model || "ECS"}
+
+[4단계 파싱 절차]
+
+Step 1. GeneralReport (또는 헤더)
+- 선명, IMO 번호, 제조사, 분析 기간 추출
+
+Step 2. OperationTimeReport
+- 각 운전(BALLAST/DEBALLAST/STRIPPING)의 시작시간, 종료시간, 처리용량, GPS 위치 추출
+- 최근 30건으로 제한
+- ⚠️ 반드시 분析 기간(월) 전체의 운전을 모두 추출할 것
+  특정 날짜 1~2일치만 있는 경우: 문서를 처음부터 끝까지 다시 스캔하여 누락된 운전 확인
+  운전 날짜가 모두 동일한 날짜에만 집중되어 있다면 데이터 누락 가능성이 높으므로 재확인
+
+Step 3. EventLogReport — 이벤트 로그 파싱
+- EventLog 데이터는 별도 EventLogReport 파일에 있을 수도 있고,
+  통합 리포트 PDF 내 "Event Log" 섹션으로 포함될 수도 있음 — 양쪽 모두 확인할 것
+- 발생 날짜/시간, 레벨(Alarm/Trip/Warning/Normal), 코드, 설명 추출
+- 최대 60건으로 제한
+
+[반복 이벤트 처리]
+- 동일 code가 많이 반복되면: 처음 3건 + 마지막 1건만 추출, 나머지 건너뜀
+- Trip 이벤트는 예외 — 전부 추출
+- EventLog가 방대한 경우 DataReport·OperationTimeReport·GeneralReport 파싱에 토큰 집중
+
+Step 4. DataReport (TRO 평균 계산 + 센서 매칭)
+
+[TRO 평균 계산 — 핵심 규칙]
+DataReport에서 각 운전(BALLAST/DEBALLAST)의 TRO 평균을 계산할 때:
+
+① OperationTimeReport에서 각 운전의 정확한 시작시간·종료시간 확인
+② DataReport에서 해당 운전 시간 범위의 TRO 행을 추출
+③ 아래 구간은 반드시 제외 (배관 잔류수 영향으로 TRO 값이 부정확):
+   - 운전 시작 후 첫 10분 이내 데이터
+   - 운전 종료 전 마지막 10분 이내 데이터
+④ 제외 후 남은 "안정 구간" 데이터만 평균 계산 → tro_data.ballasting_avg / deballasting_avg
+⑤ 안정 구간 데이터가 없거나(운전시간 20분 이하) 데이터가 0개면 → null
+
+[센서 매칭 (알람 발생 시점)]
+- Step 3의 알람 발생 시각 기준 ±5분 이내 DataReport 행에서 sensor 값 추출
+- 여러 행이 있으면 알람 시각에 가장 가까운 1개 행만 선택
+- ±5분 내 데이터 없으면 해당 필드 null
+
+[overall_status 판별 기준]
+
+NORMAL (모두 해당 시):
+- Trip 이벤트 0건
+- 동일 코드 알람 2건 이하
+- TRO 주입(Ballasting) 안정 구간 평균 5~10ppm 유지
+- TRO 배출(De-ballasting) 안정 구간 평균 0.1ppm 미만(IMO 기준)
+  ※ 안정 구간 = 운전 시작 후 10분 ~ 종료 전 10분 (Step 4 계산 기준과 동일)
+- 데이터 일부 누락(null)은 NORMAL 판정에 영향 없음
+
+WARNING:
+- Trip 없이 동일 코드 알람 3~4건 발생
+- TRO가 기준 범위에서 일시적으로 벗어났으나 운전은 정상 완료
+- 데이터 기록 누락 다수
+
+CRITICAL (하나라도 해당):
+- Trip 이벤트 1건 이상 발생
+- 동일 코드 알람 5건 이상 반복 또는 3회 이상 Trip
+- System Failure 또는 명백한 장비 고장 명시
+- TRO 배출 기준 초과(0.1ppm 초과)가 연속 3회 이상 명백하게 발생
+
+[ai_remarks 작성 지침]
+- 반드시 구체적 숫자 포함: 운전 횟수, TRO 평균값(ppm), 주요 알람 코드 및 발생 건수
+- 수치 없는 포괄적 서술 금지 ("전반적으로 정상", "문제없이 완료" 등)
+- 100% 한국어 작성 (BWTS, TRO, Alarm 등 고유명사 제외)
+- 예시: "당월 주입 3회/배출 2회 운전. 주입 평균 TRO 6.2ppm으로 정상 범위(5~10ppm) 내 유지. CODE200(TRO 저하) Alarm 3건 발생 — CLX 시약 상태 확인 권장."
+
+[ai_remarks_en 작성 지침]
+- ai_remarks와 동일한 내용을 영어로 작성 (본선 발송 이메일용)
+- Must include specific numbers: operation count, TRO average (ppm), alarm code counts
+- Example: "3 ballasting / 2 deballasting operations this month. Average TRO 6.2ppm within normal range (5~10ppm). CODE200 (TRO Low) Alarm×3 — recommend checking CLX reagent condition."
+
+[주의사항]
+- 불확실한 경우 CRITICAL보다 WARNING/NORMAL 우선
+- 확인 불가 항목은 null
+- 문자열 값에 줄바꿈 문자 포함 금지 (한 줄로 작성)
+
+${EXTRACTION_SCHEMA}
+`.trim();
+
+
+const REMARK_PROMPT_TEMPLATE = (aiResult, operatorNote, lang = "ko") => {
+  const isEn = lang === "en";
+  const langInstr = isEn
+    ? "Write entirely in professional English."
+    : "반드시 한국어로만 작성하세요. 영어 혼용 금지.";
+
+  // 알람 코드별 요약 목록 생성
+  const alarms = aiResult?.error_alarms ?? [];
+  const codeMap = new Map();
+  for (const a of alarms) {
+    const code = a.code ?? "(코드없음)";
+    const desc = (a.description ?? "").replace(/\s*[\[\(]\d[\d.]*[\]\)]/g, "").trim();
+    const lv   = (a.level ?? "").toLowerCase();
+    if (!codeMap.has(code)) codeMap.set(code, { desc, trip: 0, alarm: 0 });
+    const g = codeMap.get(code);
+    if (lv === "trip") g.trip++; else g.alarm++;
+  }
+  const alarmList = Array.from(codeMap.entries())
+    .map(([code, g]) => {
+      const cnt = [];
+      if (g.trip)  cnt.push(isEn ? `TRIP x${g.trip}` : `Trip ${g.trip}회`);
+      if (g.alarm) cnt.push(isEn ? `Alarm x${g.alarm}` : `Alarm ${g.alarm}회`);
+      return `[${code}] ${g.desc} (${cnt.join(" / ")})`;
+    }).join("\n");
+
+  const exampleKo = `[CODE200] TRO Concentration Low: CLX 시약 유효기간 만료 또는 TSU BYPASS LINE 막힘 가능성이 있습니다. CLX 시약 교체 여부 및 BYPASS LINE 소통 상태를 점검하시기 바랍니다.`;
+  const exampleEn = `[CODE200] TRO Concentration Low: Possible CLX reagent expiry or TSU BYPASS LINE blockage. Please check CLX reagent date and verify BYPASS LINE flow.`;
+
+  return `
+당신은 선박 평형수 처리 시스템(BWTS) 전문 기술자입니다.
+아래 알람 목록과 담당자 메모를 바탕으로 코드별 기술 리마크를 작성하세요.
+
+[발생 알람 목록]
+${alarmList || "(없음)"}
+
+[담당자 메모]
+${operatorNote || "(없음)"}
+
+[작성 형식]
+발생한 각 알람 코드에 대해 아래 형식으로 작성하세요:
+[CODE번호] 알람명: 추정 원인 및 권장 점검 사항.
+
+예시: ${isEn ? exampleEn : exampleKo}
+
+[작성 규칙]
+- 각 코드마다 1줄, 코드 항목 간은 줄바꿈으로 구분
+- "~가능성이 있습니다", "~의심됩니다", "~권장합니다" 어조 사용
+- "~고장입니다", "~문제입니다" 단정 표현 금지
+- 현장에서 직접 확인 가능한 구체적 점검 항목 포함
+- ${langInstr}
+
+JSON 형식으로 응답하세요 (줄바꿈은 \\n으로 표현):
+{"final_remark": "[CODE100] ...: ...\\n[CODE200] ...: ..."}
+`.trim();
+};
+
+// ── JSON 파싱 (개행/특수문자/잘림 보정 포함) ─────────────────
+function robustJsonParse(text) {
+  const cleaned = text.replace(/^```json\n?/, "").replace(/\n?```$/, "").trim();
+
+  // 1차 시도: 그대로
+  try { return JSON.parse(cleaned); } catch { /* continue */ }
+
+  // 2차: 문자열 내 개행 제거
+  const noNewline = cleaned.replace(/(?<=[^\\])"((?:[^"\\]|\\.)*)"/g, (_, inner) =>
+    `"${inner.replace(/[\r\n\t]+/g, " ")}"`
+  );
+  try { return JSON.parse(noNewline); } catch { /* continue */ }
+
+  // 3차: 잘린 JSON 복구 시도 (닫히지 않은 배열/객체 닫기)
+  let partial = noNewline;
+  // 열린 따옴표 닫기
+  const quoteCount = (partial.match(/(?<!\\)"/g) || []).length;
+  if (quoteCount % 2 !== 0) partial += '"';
+  // 닫히지 않은 배열/객체 닫기
+  const stack = [];
+  for (const ch of partial) {
+    if (ch === "{" || ch === "[") stack.push(ch === "{" ? "}" : "]");
+    else if (ch === "}" || ch === "]") stack.pop();
+  }
+  partial += stack.reverse().join("");
+  try { return JSON.parse(partial); } catch { /* continue */ }
+
+  throw new Error(`JSON 파싱 실패: ${cleaned.slice(0, 80)}…`);
+}
+
+// ── 알람 레벨 정규화 (TRIP/trip/Trip → Trip 등) ───────────────
+function normalizeAlarmLevels(alarms) {
+  const levelMap = { trip: "Trip", alarm: "Alarm", warning: "Warning", normal: "Normal" };
+  return alarms.map((a) => ({
+    ...a,
+    level: levelMap[(a.level || "").toLowerCase()] || a.level,
+  }));
+}
+
+// ── 반복 알람 그룹화 ─────────────────────────────────────────
+function groupRepeatAlarms(alarms) {
+  const map = new Map();
+  for (const a of alarms) {
+    const baseDesc = (a.description || "").replace(/\s*[\[\(]\d[\d.]*[\]\)]/g, "").trim();
+    const key = `${a.code ?? ""}|${baseDesc}`;
+    if (!map.has(key)) {
+      map.set(key, { ...a, description: baseDesc, count: 1,
+                     firstDate: a.date, lastDate: a.date, level: a.level });
+    } else {
+      const g = map.get(key);
+      g.count++;
+      // Trip이 한 번이라도 있으면 level을 Trip으로 승격
+      if ((a.level || "").toLowerCase() === "trip") g.level = "Trip";
+      if (a.date && (!g.firstDate || a.date < g.firstDate)) g.firstDate = a.date;
+      if (a.date && (!g.lastDate  || a.date > g.lastDate))  g.lastDate  = a.date;
+    }
+  }
+  return Array.from(map.values()).map((g) => {
+    const dateRange =
+      g.count > 1 && g.firstDate && g.lastDate && g.firstDate !== g.lastDate
+        ? `${g.firstDate}~${g.lastDate}`
+        : (g.firstDate || null);
+    return {
+      code:            g.code,
+      description:     g.count > 1 ? `${g.description} (×${g.count}회)` : g.description,
+      level:           g.level,
+      date:            dateRange,
+      time:            g.count === 1 ? g.time : null,
+      sensor_at_event: g.count === 1 ? g.sensor_at_event : null,
+    };
+  });
+}
+
+// ── 밸브 과다 경고 자동 추가 ──────────────────────────────────
+const VALVE_PATTERN = /Valve|밸브/i;
+const VALVE_CODES   = /^7[2-3]\d$/;
+
+function appendValveWarning(data) {
+  const alarms = data.error_alarms || [];
+  const valveAlarms = alarms.filter((a) =>
+    VALVE_PATTERN.test(a.description || "") || VALVE_CODES.test(String(a.code || ""))
+  );
+  if (valveAlarms.length === 0) return;
+
+  // ×N회 표기에서 count 추출 (없으면 1)
+  const totalCount = valveAlarms.reduce((sum, a) => {
+    const m = (a.description || "").match(/×(\d+)회/);
+    return sum + (m ? parseInt(m[1]) : 1);
+  }, 0);
+  if (totalCount < 5) return;
+
+  const codes = [...new Set(valveAlarms.map((a) => a.code).filter(Boolean))].join(", ");
+  const note = `CODE(${codes}) 밸브 비정상 동작 총 ${totalCount}회 감지 — 해당 밸브 개도 설정 및 센서 점검 권장.`;
+  if (data.ai_remarks && !data.ai_remarks.includes("밸브 비정상")) {
+    data.ai_remarks += " " + note;
+  }
+  if (data.ai_remarks_en && !data.ai_remarks_en.includes("valve")) {
+    const noteEn = `CODE(${codes}) Valve abnormal operation detected ${totalCount} times — recommend checking valve position and feedback sensor.`;
+    data.ai_remarks_en += " " + noteEn;
+  }
+}
+
+// ── TRO 범위 체크 → ai_remarks 보완 ──────────────────────────
+function checkTroRange(data) {
+  const tro = data.tro_data || {};
+  const notes = [];
+
+  if (tro.ballasting_avg != null) {
+    if (tro.ballasting_avg < 5)
+      notes.push(`주입 TRO ${tro.ballasting_avg}ppm — 정상 기준(5~10ppm) 미달, CLX 시약 상태 확인 필요.`);
+    else if (tro.ballasting_avg > 10)
+      notes.push(`주입 TRO ${tro.ballasting_avg}ppm — 정상 기준(5~10ppm) 초과.`);
+  }
+  if (tro.deballasting_avg != null && tro.deballasting_avg > 0.1)
+    notes.push(`배출 TRO ${tro.deballasting_avg}ppm — IMO 기준(0.1ppm) 초과, 즉시 확인 필요.`);
+
+  for (const note of notes) {
+    if (data.ai_remarks && !data.ai_remarks.includes(note.slice(0, 12)))
+      data.ai_remarks += " " + note;
+    if (data.ai_remarks_en) {
+      const noteEn =
+        note.includes("미달")   ? `Ballasting TRO ${tro.ballasting_avg}ppm — below normal range (5~10ppm), check CLX reagent condition.`
+        : note.includes("초과") && note.includes("주입") ? `Ballasting TRO ${tro.ballasting_avg}ppm — exceeds normal range (5~10ppm).`
+        : `Deballasting TRO ${tro.deballasting_avg}ppm — exceeds IMO limit (0.1ppm), immediate check required.`;
+      if (!data.ai_remarks_en.includes(String(tro.ballasting_avg ?? tro.deballasting_avg)))
+        data.ai_remarks_en += " " + noteEn;
+    }
+  }
+}
+
+// ── overall_status JS 완전 재계산 ────────────────────────────
+function recalcOverallStatus(data) {
+  const alarms = data.error_alarms || [];
+  const tro    = data.tro_data    || {};
+
+  // Trip 건수
+  const tripCount = alarms.filter((a) => (a.level || "").toLowerCase() === "trip").length;
+
+  // 알람 최대 반복 횟수 (×N회 표기에서 추출, 없으면 1)
+  const maxRepeat = alarms.reduce((max, a) => {
+    const m = (a.description || "").match(/×(\d+)회/);
+    return Math.max(max, m ? parseInt(m[1]) : 1);
+  }, 0);
+
+  // TRO 기준 위반 여부
+  const troBallastBad   = tro.ballasting_avg   != null && (tro.ballasting_avg < 5 || tro.ballasting_avg > 10);
+  const troDeballastBad = tro.deballasting_avg  != null && tro.deballasting_avg > 0.1;
+  const troAllNull      = tro.ballasting_avg    == null && tro.deballasting_avg == null;
+
+  if (tripCount >= 1 || maxRepeat >= 5 || troDeballastBad) {
+    data.overall_status = "CRITICAL";
+  } else if (maxRepeat >= 3 || alarms.length >= 3 || troBallastBad || troAllNull) {
+    data.overall_status = "WARNING";
+    // TRO 전체 누락 시 ai_remarks에 경고 추가
+    if (troAllNull) {
+      const note = "TRO 측정값 없음 — 해당 월 DataReport 누락 또는 TRO 센서 미기록. 별도 확인 필요.";
+      if (data.ai_remarks && !data.ai_remarks.includes("TRO 측정값 없음"))
+        data.ai_remarks += " " + note;
+      if (data.ai_remarks_en && !data.ai_remarks_en.includes("TRO data"))
+        data.ai_remarks_en += " TRO measurement data missing — please verify DataReport or TRO sensor records.";
+    }
+  } else {
+    data.overall_status = "NORMAL";
+  }
+}
+
+// ── 운전 날짜 편중 감지 (특정 날짜에만 집중 → 누락 경고) ────
+function checkOperationCoverage(data) {
+  const ops = data.operations || [];
+  if (ops.length === 0) return;
+
+  // 운전 날짜 목록 (null 제외)
+  const dates = ops.map((o) => o.date).filter(Boolean);
+  if (dates.length === 0) return;
+
+  const uniqueDates = new Set(dates);
+
+  // 모든 운전이 단 하루에 집중된 경우
+  if (uniqueDates.size === 1 && ops.length >= 2) {
+    const onlyDate = [...uniqueDates][0];
+    const note = `⚠️ 운전 기록이 ${onlyDate} 1일치에만 집중 — 월 전체 데이터 누락 가능성 있음. OperationTimeReport 재확인 권장.`;
+    const noteEn = `⚠️ All operations recorded on ${onlyDate} only — possible data omission for other dates. Please re-check OperationTimeReport.`;
+    if (data.ai_remarks && !data.ai_remarks.includes("운전 기록이")) {
+      data.ai_remarks += " " + note;
+    }
+    if (data.ai_remarks_en && !data.ai_remarks_en.includes("operations recorded on")) {
+      data.ai_remarks_en += " " + noteEn;
+    }
+    // 상태도 WARNING 이상으로
+    if (data.overall_status === "NORMAL") data.overall_status = "WARNING";
+  }
+}
+
+// ── ai_remarks 비어있을 때 기본 요약 자동 생성 ────────────────
+function autoFillRemarks(data) {
+  if (data.ai_remarks && data.ai_remarks.length > 20) return;
+
+  const ops           = data.operations || [];
+  const ballastCount  = ops.filter((o) => (o.operation_mode || "").includes("BALLAST") && !o.operation_mode.includes("DE")).length;
+  const deballastCount = ops.filter((o) => o.operation_mode === "DEBALLAST").length;
+  const tro           = data.tro_data || {};
+  const alarmCount    = (data.error_alarms || []).length;
+
+  const parts = [];
+  if (ballastCount || deballastCount)
+    parts.push(`당월 주입 ${ballastCount}회/배출 ${deballastCount}회 운전.`);
+  if (tro.ballasting_avg != null)
+    parts.push(`주입 평균 TRO ${tro.ballasting_avg}ppm.`);
+  if (tro.deballasting_avg != null)
+    parts.push(`배출 평균 TRO ${tro.deballasting_avg}ppm.`);
+  if (alarmCount > 0)
+    parts.push(`알람/에러 ${alarmCount}건 발생.`);
+  else if (alarmCount === 0 && ops.length > 0)
+    parts.push("알람/에러 없음.");
+
+  if (parts.length > 0) {
+    data.ai_remarks    = parts.join(" ");
+    data.ai_remarks_en = data.ai_remarks
+      .replace("당월 주입", "This month ballasting")
+      .replace("회/배출", "× / deballasting")
+      .replace("회 운전.", "× operations.")
+      .replace("주입 평균 TRO", "Avg ballasting TRO")
+      .replace("배출 평균 TRO", "Avg deballasting TRO")
+      .replace("ppm.", "ppm.")
+      .replace("알람/에러 없음.", "No alarms/errors.")
+      .replace(/알람\/에러 (\d+)건 발생\./, "Alarms/errors: $1 occurrences.");
+  }
+}
+
+
+// ── 응답 후처리: 필수 필드 검증 및 정규화 ───────────────────
+function validateAndNormalizeResult(data) {
+  if (!data || typeof data !== "object") return {};
+  // overall_status: 허용값 외에는 null (mapOverallStatus에서 재추론)
+  const s = (data.overall_status || "").toUpperCase();
+  if (!["NORMAL", "WARNING", "CRITICAL"].includes(s)) data.overall_status = null;
+  // 배열 보장
+  if (!Array.isArray(data.error_alarms)) data.error_alarms = [];
+  if (!Array.isArray(data.operations))   data.operations  = [];
+  // ai_remarks / ai_remarks_en 없으면 빈 문자열
+  if (!data.ai_remarks) data.ai_remarks = "";
+  if (!data.ai_remarks_en) data.ai_remarks_en = "";
+  // 1. 알람 레벨 정규화 (Trip/Alarm/Warning 통일)
+  data.error_alarms = normalizeAlarmLevels(data.error_alarms);
+  // 2. 반복 알람 그룹화 (×N회)
+  data.error_alarms = groupRepeatAlarms(data.error_alarms);
+  // 3. 밸브 과다 경고 추가
+  appendValveWarning(data);
+  // 4. TRO 범위 체크 → ai_remarks 보완
+  checkTroRange(data);
+  // 5. overall_status JS 완전 재계산 (Gemini 판정 대체)
+  recalcOverallStatus(data);
+  // 6. 운전 날짜 편중 감지 (특정 날짜만 → 누락 경고)
+  checkOperationCoverage(data);
+  // 7. ai_remarks 비어있으면 기본 요약 자동 생성
+  autoFillRemarks(data);
+  return data;
+}
+
+// ── 타임아웃 fetch 래퍼 ──────────────────────────────────────
+function fetchWithTimeout(url, options, timeoutMs = 300_000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal }).finally(() =>
+    clearTimeout(timer)
+  );
+}
+
+// ── 핵심 fetch 함수 ──────────────────────────────────────────
+async function callGemini(parts, retries = 3) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const res = await fetchWithTimeout(
+        `${GEMINI_ENDPOINT}?key=${CONFIG.GEMINI_API_KEY}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts }],
+            generationConfig: {
+              responseMimeType: "application/json",
+              temperature: 0.1,
+              maxOutputTokens: 65536,
+            },
+          }),
+        },
+        300_000 // 5분 타임아웃
+      );
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(
+          `Gemini API error ${res.status}: ${err?.error?.message || res.statusText}`
+        );
+      }
+
+      const data = await res.json();
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!text) throw new Error("Gemini 응답에 텍스트가 없습니다.");
+
+      return validateAndNormalizeResult(robustJsonParse(text));
+    } catch (err) {
+      // 페이지/토큰 초과만 재시도 불필요 (타임아웃·500·파싱오류는 재시도)
+      const noRetry = err.message.includes("exceeds");
+      if (attempt === retries || noRetry) throw err;
+      const isTimeout = err.name === "AbortError" || err.message.includes("aborted");
+      const is500 = err.message.includes("500");
+      const delay = isTimeout ? 5000 : is500 ? 3000 * attempt : 1500 * attempt;
+      console.warn(`Gemini 시도 ${attempt} 실패, ${delay/1000}초 후 재시도...`, err.message);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+}
+
+/**
+ * Google Drive PDF → Gemini Files API 업로드 후 분석
+ * - fileUri 참조 방식: base64 인라인 대비 요청 크기 최소화
+ * - 세션 캐시: 같은 파일은 재업로드 없이 URI 재사용 (47시간)
+ */
+
+// ── Gemini Files API 세션 캐시 ───────────────────────────────
+const _fileUriCache = new Map();
+const FILES_EXPIRE_MS = 47 * 60 * 60 * 1000;
+
+async function uploadToGeminiFiles(blob, fileName) {
+  const initRes = await fetchWithTimeout(
+    `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${CONFIG.GEMINI_API_KEY}`,
+    {
+      method: "POST",
+      headers: {
+        "X-Goog-Upload-Protocol": "resumable",
+        "X-Goog-Upload-Command": "start",
+        "X-Goog-Upload-Header-Content-Length": String(blob.size),
+        "X-Goog-Upload-Header-Content-Type": "application/pdf",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ file: { displayName: fileName } }),
+    },
+    60_000
+  );
+  if (!initRes.ok) throw new Error(`Files API 초기화 실패: ${initRes.status}`);
+  const uploadUrl = initRes.headers.get("X-Goog-Upload-URL");
+  if (!uploadUrl) throw new Error("Files API 업로드 URL 없음");
+
+  const uploadRes = await fetchWithTimeout(
+    uploadUrl,
+    {
+      method: "POST",
+      headers: {
+        "X-Goog-Upload-Command": "upload, finalize",
+        "X-Goog-Upload-Offset": "0",
+        "Content-Type": "application/pdf",
+      },
+      body: blob,
+    },
+    180_000
+  );
+  if (!uploadRes.ok) throw new Error(`Files API 업로드 실패: ${uploadRes.status}`);
+  const fileData = await uploadRes.json();
+  return fileData?.file?.uri;
+}
+
+async function getOrUploadFileUri(fileId, accessToken) {
+  const cached = _fileUriCache.get(fileId);
+  if (cached && Date.now() - cached.uploadedAt < FILES_EXPIRE_MS) {
+    console.log(`[Files API] 캐시 재사용: ${fileId}`);
+    return cached.uri;
+  }
+
+  const res = await fetchWithTimeout(
+    `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+    180_000
+  );
+  if (!res.ok) throw new Error(`Drive 다운로드 실패 (${fileId}): ${res.status}`);
+  const blob = await res.blob();
+
+  console.log(`[Files API] 업로드: ${fileId} (${(blob.size/1024/1024).toFixed(1)} MB)`);
+  const uri = await uploadToGeminiFiles(blob, `bwts_${fileId}.pdf`);
+  if (!uri) throw new Error(`Files API URI 없음 (${fileId})`);
+
+  _fileUriCache.set(fileId, { uri, uploadedAt: Date.now() });
+  return uri;
+}
+
+export async function analyzePdfFromDrive(fileIds, accessToken, vessel = {}) {
+  const ids = Array.isArray(fileIds) ? fileIds : [fileIds];
+
+  // 1. 파일들을 Gemini Files API에 업로드 (캐시 활용, 병렬)
+  const uris = await Promise.all(ids.map((id) => getOrUploadFileUri(id, accessToken)));
+
+  // 2. fileUri 참조 방식으로 parts 구성 (선박 정보 포함)
+  const makeParts = (uriList) => [
+    { text: ANALYSIS_PROMPT(vessel) },
+    ...uriList.map((uri) => ({ fileData: { mimeType: "application/pdf", fileUri: uri } })),
+  ];
+
+  // 3. 전체 시도 → 실패 시 개별 시도 fallback
+  const shouldFallback = (e) =>
+    uris.length > 1 && (
+      e.message.includes("exceeds") ||
+      e.message.includes("500") ||
+      e.message.includes("파싱 실패") ||
+      e.name === "AbortError" ||
+      e.message.includes("aborted")
+    );
+
+  try {
+    return await callGemini(makeParts(uris));
+  } catch (err) {
+    if (!shouldFallback(err)) throw err;
+    console.warn("전체 묶음 실패, 개별 분석 시도...", err.message);
+    for (const uri of uris) {
+      try {
+        return await callGemini(makeParts([uri]));
+      } catch (innerErr) {
+        console.warn("개별 실패, 다음...", innerErr.message);
+        if (!innerErr.message.includes("exceeds")) throw innerErr;
+      }
+    }
+    throw new Error("모든 PDF 분析 실패. 파일 크기 초과 또는 Gemini 서버 오류.");
+  }
+}
+
+/**
+ * 담당자 메모를 반영한 최종 리마크 생성
+ *
+ * @param {Object} aiResult      - analyzePdfFromDrive() 결과
+ * @param {string} operatorNote  - 담당자 입력 메모
+ * @param {string} lang          - "ko" 또는 "en"
+ * @returns {string} 최종 리마크 텍스트
+ */
+export async function generateFinalRemark(aiResult, operatorNote, lang = "ko") {
+  const parts = [{ text: REMARK_PROMPT_TEMPLATE(aiResult, operatorNote, lang) }];
+  const result = await callGemini(parts);
+  return result?.final_remark || "리마크 생성 실패";
+}
