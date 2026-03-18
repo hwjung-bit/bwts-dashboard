@@ -19,8 +19,9 @@ export default function RemarkPanel({ vessel, analysisResult, accessToken, onUpd
   const [sendError, setSendError]   = useState("");
 
   const isReviewed = vessel?.analysisStatus === "REVIEWED";
+  const isConfirmedNormal = vessel?.analysisStatus === "NORMAL" && vessel?.reviewedAt;
   const needsReview = ["WARNING", "CRITICAL"].includes(vessel?.analysisStatus);
-  const canSendMail = isReviewed || needsReview;
+  const canSendMail = isReviewed || isConfirmedNormal || needsReview;
 
   async function handleGenerateAi() {
     if (!analysisResult) { setAiError("먼저 PDF 분석을 완료해주세요."); return; }
@@ -50,6 +51,15 @@ export default function RemarkPanel({ vessel, analysisResult, accessToken, onUpd
     });
   }
 
+  function handleMarkNormal() {
+    onUpdate?.({
+      reviewNote: note,
+      reviewRemark: remark,
+      analysisStatus: "NORMAL",
+      reviewedAt: new Date().toISOString(),
+    });
+  }
+
   async function handleSendEmail() {
     setSending(true);
     setSendError("");
@@ -75,6 +85,16 @@ export default function RemarkPanel({ vessel, analysisResult, accessToken, onUpd
         {isReviewed && (
           <span className="text-xs bg-indigo-100 text-indigo-700 border border-indigo-200 px-2.5 py-1 rounded-full font-medium">
             ✓ 검토완료
+            {vessel.reviewedAt && (
+              <span className="ml-1 opacity-70">
+                {new Date(vessel.reviewedAt).toLocaleDateString("ko-KR")}
+              </span>
+            )}
+          </span>
+        )}
+        {isConfirmedNormal && (
+          <span className="text-xs bg-green-100 text-green-700 border border-green-200 px-2.5 py-1 rounded-full font-medium">
+            ✅ 정상 확인
             {vessel.reviewedAt && (
               <span className="ml-1 opacity-70">
                 {new Date(vessel.reviewedAt).toLocaleDateString("ko-KR")}
@@ -114,12 +134,21 @@ export default function RemarkPanel({ vessel, analysisResult, accessToken, onUpd
           ) : "🤖 AI 리마크 생성"}
         </button>
         {!isReviewed && analysisResult && (
-          <button
-            onClick={handleMarkReviewed}
-            className="px-4 py-2 text-sm bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors"
-          >
-            ✓ 검토 완료
-          </button>
+          <>
+            <button
+              onClick={handleMarkNormal}
+              className="px-4 py-2 text-sm bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors"
+              title="이상 없음 — 주의/이상 상태를 정상으로 처리"
+            >
+              ✅ 정상 확인
+            </button>
+            <button
+              onClick={handleMarkReviewed}
+              className="px-4 py-2 text-sm bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors"
+            >
+              ✓ 검토 완료
+            </button>
+          </>
         )}
       </div>
 
