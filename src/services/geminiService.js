@@ -117,6 +117,10 @@ Step 2. OperationTimeReport
 - ⚠️ 반드시 분析 기간(월) 전체의 운전을 모두 추출할 것
   특정 날짜 1~2일치만 있는 경우: 문서를 처음부터 끝까지 다시 스캔하여 누락된 운전 확인
   운전 날짜가 모두 동일한 날짜에만 집중되어 있다면 데이터 누락 가능성이 높으므로 재확인
+- OperationTimeReport가 보이지 않더라도 DataReport에서 운전 시간 범위를 역추적하여 복원할 것
+- 운전 기록을 하나도 찾지 못한 경우: PDF 전체를 다시 스캔하고 "Ballast", "Deballast",
+  "Operation", "Start", "End" 키워드가 포함된 모든 표를 확인할 것
+- 운전 기록이 정말 없는 달인지, 아니면 PDF 파싱 실패인지 구분하여 추출
 
 Step 3. EventLogReport — 이벤트 로그 파싱
 - EventLog 데이터는 별도 EventLogReport 파일에 있을 수도 있고,
@@ -306,6 +310,8 @@ function groupRepeatAlarms(alarms) {
   const map = new Map();
   for (const a of alarms) {
     const baseDesc = (a.description || "").replace(/\s*[\[\(]\d[\d.]*[\]\)]/g, "").trim();
+    // 코드와 설명이 둘 다 비어있는 의미없는 알람은 건너뜀
+    if (!a.code && !baseDesc) continue;
     const key = `${a.code ?? ""}|${baseDesc}`;
     if (!map.has(key)) {
       map.set(key, { ...a, description: baseDesc, count: 1,
@@ -461,6 +467,23 @@ function checkOperationCoverage(data) {
   }
 }
 
+// ── 운전 0회인데 TRO 값이 있거나 알람이 있는 경우 경고 ────────
+function checkZeroOperations(data) {
+  const ops = data.operations || [];
+  const tro = data.tro_data || {};
+  const alarms = data.error_alarms || [];
+  // 운전이 0회인데 TRO 또는 알람이 있으면 → 추출 실패 가능성
+  if (ops.length === 0 && (tro.ballasting_avg != null || tro.deballasting_avg != null || alarms.length > 0)) {
+    const note = "⚠️ 운전 기록 0건 추출됨 — OperationTimeReport 누락 또는 PDF 인식 오류 가능성. 재분석 권장.";
+    const noteEn = "⚠️ 0 operations extracted — possible missing OperationTimeReport or PDF parsing error. Re-analysis recommended.";
+    if (data.ai_remarks && !data.ai_remarks.includes("운전 기록 0건"))
+      data.ai_remarks = note + " " + data.ai_remarks;
+    if (data.ai_remarks_en && !data.ai_remarks_en.includes("0 operations"))
+      data.ai_remarks_en = noteEn + " " + data.ai_remarks_en;
+    if (data.overall_status === "NORMAL") data.overall_status = "WARNING";
+  }
+}
+
 // ── ai_remarks 비어있을 때 기본 요약 자동 생성 ────────────────
 function autoFillRemarks(data) {
   if (data.ai_remarks && data.ai_remarks.length > 20) return;
@@ -522,7 +545,9 @@ function validateAndNormalizeResult(data) {
   recalcOverallStatus(data);
   // 6. 운전 날짜 편중 감지 (특정 날짜만 → 누락 경고)
   checkOperationCoverage(data);
-  // 7. ai_remarks 비어있으면 기본 요약 자동 생성
+  // 7. 운전 0회인데 TRO/알람이 있는 경우 경고
+  checkZeroOperations(data);
+  // 8. ai_remarks 비어있으면 기본 요약 자동 생성
   autoFillRemarks(data);
   return data;
 }
