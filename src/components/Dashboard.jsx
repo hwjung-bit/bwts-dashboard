@@ -73,6 +73,7 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
   const [analyzeError, setAnalyzeError] = useState("");
   const [analyzingVesselId, setAnalyzingVesselId] = useState(null); // 단일 재분석 중인 선박
   const [scanInfo, setScanInfo]        = useState(null);
+  const [scanExpanded, setScanExpanded] = useState(true);
   const [selectedId, setSelectedId]   = useState(null);
 
   // 월/연도 변경 시 해당 월 데이터 로드 (Sheets 우선, fallback localStorage)
@@ -423,13 +424,29 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
 
           {/* ── Drive 스캔 결과 ── */}
           {scanInfo && (
-            <div className="mb-5 bg-white border border-slate-200 rounded-xl p-4 shadow-sm text-sm">
-              <div className="flex items-center justify-between mb-3">
-                <span className="font-semibold text-slate-700">
-                  📂 Drive 스캔 결과 — {year}년 {month}월 (총 {scanInfo.total}개 폴더)
+            <div className="mb-5 bg-white border border-slate-200 rounded-xl shadow-sm text-sm">
+              <div
+                className="flex items-center justify-between p-4 cursor-pointer select-none"
+                onClick={() => setScanExpanded((v) => !v)}
+              >
+                <span className="font-semibold text-slate-700 flex items-center gap-2">
+                  📂 Drive 스캔 결과 — {year}년 {month}월
+                  <span className="text-xs font-normal text-teal-600 bg-teal-50 border border-teal-200 rounded-full px-2 py-0.5">
+                    수신 {scanInfo.matched.length}척
+                  </span>
+                  {scanInfo.unmatched.length > 0 && (
+                    <span className="text-xs font-normal text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">
+                      미등록 {scanInfo.unmatched.length}개
+                    </span>
+                  )}
                 </span>
-                <button onClick={() => setScanInfo(null)} className="text-slate-400 hover:text-slate-600 text-lg leading-none">✕</button>
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-400 text-xs">{scanExpanded ? "▲ 접기" : "▼ 펼치기"}</span>
+                  <button onClick={(e) => { e.stopPropagation(); setScanInfo(null); }} className="text-slate-400 hover:text-slate-600 text-lg leading-none">✕</button>
+                </div>
               </div>
+              {scanExpanded && (
+              <div className="px-4 pb-4 border-t border-slate-100 pt-3">
               {scanInfo.matched.length > 0 && (
                 <div className="mb-3">
                   <div className="text-xs font-medium text-slate-500 mb-1.5">✅ 매칭된 선박</div>
@@ -464,6 +481,8 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
               )}
               {scanInfo.total === 0 && (
                 <div className="text-slate-400">해당 월에 수신 폴더가 없습니다.</div>
+              )}
+              </div>
               )}
             </div>
           )}
