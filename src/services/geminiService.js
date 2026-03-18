@@ -165,17 +165,18 @@ Step 2. OperationTimeReport
 - 운전 기록이 정말 없는 달인지, 아니면 PDF 파싱 실패인지 구분하여 추출
 
 Step 3. EventLogReport — 이벤트 로그 파싱
-- EventLog 데이터는 별도 EventLogReport 파일에 있을 수도 있고,
-  통합 리포트 PDF 내 "Event Log" 섹션으로 포함될 수도 있음 — 양쪽 모두 확인할 것
+- ⚠️ PDF가 TOTAL LOG(통합본) 한 파일인 경우, 문서 전체를 처음부터 끝까지 스캔하여 이벤트 로그 섹션을 반드시 찾을 것
+- 섹션 제목은 "Event Log", "Alarm List", "EventLogReport", "BWTS Log", "Event History" 등 다양하게 표기될 수 있음 — 제목에 관계없이 DATE·LEVEL·DESCRIPT 열이 있는 표를 찾아 파싱할 것
 - 자동 인식한 헤더를 기준으로 DATE, DEVICE, LEVEL, DESCRIPT를 매칭
 - DESCRIPT 열 텍스트에서 대괄호([])로 묶인 코드(예: [CODE201])를 찾아 'code' 필드에 분리할 것
 - 발생 날짜/시간, 레벨(Alarm/Trip/Warning/Normal), 코드, 설명 추출
 - 최대 60건으로 제한
+- ⚠️ 이벤트 로그 섹션을 끝까지 찾지 못한 경우에만 error_alarms를 빈 배열로 반환할 것. 섹션을 발견했다면 반드시 추출할 것
 
 [반복 이벤트 처리]
 - Trip 이벤트는 무조건 전부 추출
 - 그 외(Warning/Alarm)는 동일 코드당 발생 시간순으로 최대 5건까지만 추출, 나머지 무시
-- EventLog가 방대한 경우 DataReport·OperationTimeReport·GeneralReport 파싱에 토큰 집중
+- EventLog가 방대한 경우에도 Step 3 파싱을 생략하지 말 것
 
 [⚠️ VRCS 밸브 오작동 감지 특별 규칙]
 - 특정 밸브(예: [BA011F])가 수 초 단위의 짧은 시간 내에 'Valve Opened'와 'Valve Closed'를 무수히 반복하는 기록이 있다면 (Level 무관: Normal, Alarm, Warning 등 모두 포함), 개별 추출하지 마세요.
