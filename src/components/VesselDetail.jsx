@@ -218,17 +218,27 @@ export default function VesselDetail({ vessel, onClose }) {
           {r?.ai_remarks && (
             <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
               <div className="text-xs text-blue-600 font-medium mb-2">🤖 AI 분석 요약</div>
-              <div className="text-sm text-slate-700 leading-relaxed space-y-1">
+              <div className="text-sm text-slate-700 leading-relaxed space-y-1.5">
                 {r.ai_remarks.split("\n").filter(Boolean).map((line, i) => {
-                  const isOps    = line.startsWith("[운전");
-                  const isAlarm  = line.startsWith("[알람");
-                  const isSummary= line.startsWith("[종합");
-                  const icon     = isOps ? "📋" : isAlarm ? "⚠️" : isSummary ? "💡" : null;
-                  return (
-                    <p key={i} className={`${isAlarm ? "text-amber-700" : isSummary ? "text-slate-800 font-medium" : ""}`}>
-                      {icon && <span className="mr-1">{icon}</span>}{line}
+                  const isOps     = line.startsWith("[운전") || line.startsWith("[Operations]");
+                  const isAlarm   = line.startsWith("[알람") || line.startsWith("[Alarm]");
+                  const isSummary = line.startsWith("[종합") || line.startsWith("[Summary]");
+                  if (isOps) return (
+                    <p key={i} className="text-slate-700">
+                      <span className="mr-1">📋</span>{line}
                     </p>
                   );
+                  if (isAlarm) return (
+                    <p key={i} className="text-amber-700 pl-4 border-l-2 border-amber-300">
+                      <span className="mr-1">⚠️</span>{line}
+                    </p>
+                  );
+                  if (isSummary) return (
+                    <p key={i} className="text-slate-800 font-medium pt-0.5">
+                      <span className="mr-1">💡</span>{line}
+                    </p>
+                  );
+                  return <p key={i} className="text-slate-600 pl-2">{line}</p>;
                 })}
               </div>
             </div>
