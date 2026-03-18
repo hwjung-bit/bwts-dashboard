@@ -1167,8 +1167,17 @@ async function getOrUploadFileUri(fileId, accessToken, preloadedBlob = null) {
   return uri;
 }
 
-export async function analyzePdfFromDrive(fileIds, accessToken, vessel = {}) {
-  const ids = Array.isArray(fileIds) ? fileIds : [fileIds];
+export async function analyzePdfFromDrive(files, accessToken, vessel = {}) {
+  const normalizedFiles = Array.isArray(files)
+    ? files.map(f => typeof f === "string" ? { id: f, name: "" } : f)
+    : [typeof files === "string" ? { id: files, name: "" } : files];
+
+  const ids = normalizedFiles.map(f => f.id);
+
+  // 파일명 기반 TOTAL LOG 사전 판단 (페이지 수 확인 전)
+  const isTotalByName = normalizedFiles.some(f =>
+    /TOTAL|TOTAL[\s_]LOG|DATA[\s_]LOG/i.test(f.name || "")
+  );
 
   // ── TOTAL LOG 감지: 캐시 없는 파일 다운로드 후 페이지 수 확인 ──
   const preloadedBlobs = new Map(); // fileId → blob (재다운로드 방지)
@@ -1183,7 +1192,7 @@ export async function analyzePdfFromDrive(fileIds, accessToken, vessel = {}) {
     const { PDFDocument } = await import("pdf-lib");
     const pageCount = (await PDFDocument.load(await blob.arrayBuffer(), { ignoreEncryption: true })).getPageCount();
 
-    if (pageCount > TOTAL_LOG_THRESHOLD && !totalLogExtraction) {
+    if ((isTotalByName || pageCount > TOTAL_LOG_THRESHOLD) && !totalLogExtraction) {
       // TOTAL LOG → pdf.js 텍스트 추출 경로
       console.log(`[TOTAL LOG 감지] ${id}: ${pageCount}p → pdf.js 텍스트 추출 경로`);
       try {

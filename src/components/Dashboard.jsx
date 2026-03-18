@@ -140,7 +140,7 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
         return;
       }
       const logPdfs = filterLogPdfs(entry.pdfs);
-      const result = await analyzePdfFromDrive(logPdfs.map((p) => p.id), accessToken, vessel);
+      const result = await analyzePdfFromDrive(logPdfs, accessToken, vessel);
       const mapped = mapOverallStatus(result?.overall_status, result?.error_alarms);
       const finalStatus = mapped === "NO_DATA" ? "RECEIVED" : mapped;
       updateMonthlyVessel(vesselId, {
@@ -252,7 +252,7 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
           updateMonthlyVessel(vessel.id, { analysisStatus: "LOADING", analysisResult: null, analysisError: null });
           try {
             const logPdfs = filterLogPdfs(entry.pdfs);
-            const result = await analyzePdfFromDrive(logPdfs.map((p) => p.id), accessToken, vessel);
+            const result = await analyzePdfFromDrive(logPdfs, accessToken, vessel);
             const mapped = mapOverallStatus(result?.overall_status, result?.error_alarms);
             const finalStatus = mapped === "NO_DATA" ? "RECEIVED" : mapped;
             updateMonthlyVessel(vessel.id, {
