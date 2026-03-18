@@ -129,83 +129,69 @@ const STAGE2_RESPONSE_SCHEMA = {
 // ── Stage 1: 데이터 추출 전용 프롬프트 ──────────────────────
 const EXTRACTION_PROMPT = (vessel = {}) => `
 당신은 선박평형수처리장치(BWTS) 로그 PDF 데이터 추출 전문가입니다.
-첨부된 PDF에서 데이터를 정확히 추출하세요.
-숫자·날짜·코드만 있는 그대로 추출하세요. 해석하거나 판단하지 마세요.
+첨부된 PDF에서 데이터를 정확히 추출하세요. 숫자·날짜·코드만 있는 그대로 추출하고 해석하거나 판단하지 마세요.
 JSON 외의 텍스트는 절대 포함하지 마세요.
 
-[2단계 동적 파싱 방법] ← 반드시 준수
-선박 및 장비 옵션에 따라 표의 센서 구성(TRO1, TRO2, FMU1, CSU 등)이 달라지므로 열 순서를 고정하거나 추측하지 마세요.
-1. 헤더 자동 인식: 각 표에서 가장 첫 번째 줄(영문 대문자 항목들)을 기준 헤더(Column Name)로 먼저 파악
-2. Key-Value 매칭: 표의 행이 깨져 보이더라도 줄바꿈·여백 기준으로 데이터를 인식하여 헤더와 짝지을 것
-
-[데이터 파싱 보조 규칙]
-- PDF에서 추출된 텍스트는 표(Table) 형식이 깨져 값, 값 형태로 나열될 수 있음
-- 줄바꿈과 콤마를 기준으로 열(Column)과 행(Row)을 지능적으로 복원해서 읽을 것
-- 'Report', 'Log'가 이름에 포함된 파일의 데이터를 우선 읽고, 매뉴얼/도면 파일은 무시
+[동적 파싱 원칙] ← 반드시 준수
+선박·장비 옵션에 따라 표의 센서 구성(TRO1, TRO2, FMU1, CSU 등)이 달라지므로 열 순서를 고정하거나 추측하지 마세요.
+각 표에서 첫 번째 줄(영문 대문자 항목)을 기준 헤더로 먼저 파악한 뒤, 줄바꿈·여백 기준으로 데이터를 헤더와 짝지으세요.
+PDF 텍스트가 표 형식이 깨져 나열되더라도 지능적으로 열·행을 복원하여 읽을 것.
 
 [장비 정보]
 - 선명: ${vessel.name || "미상"}
 - BWTS 제조사: ${vessel.manufacturer || "Techcross"}
 - BWTS 모델: ${vessel.model || "ECS"}
 
-[4단계 추출 절차]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[추출 우선순위 — 반드시 이 순서대로 처리]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Step 1. GeneralReport (또는 헤더)
-- 선명, IMO 번호, 제조사, 분析 기간 추출
+Step 1. 기본 정보
+- 선명, IMO 번호, 제조사, 분석 기간 추출
 
-Step 2. OperationTimeReport
-- 각 운전(BALLAST/DEBALLAST/STRIPPING)의 시작시간, 종료시간, 처리용량, GPS 위치 추출
-- 최근 30건으로 제한
-- ⚠️ 반드시 분析 기간(월) 전체의 운전을 모두 추출할 것
-  특정 날짜 1~2일치만 있는 경우: 문서를 처음부터 끝까지 다시 스캔하여 누락된 운전 확인
-  운전 날짜가 모두 동일한 날짜에만 집중되어 있다면 데이터 누락 가능성이 높으므로 재확인
-- OperationTimeReport가 보이지 않더라도 DataReport에서 운전 시간 범위를 역추적하여 복원할 것
-- 운전 기록을 하나도 찾지 못한 경우: PDF 전체를 다시 스캔하고 "Ballast", "Deballast",
-  "Operation", "Start", "End" 키워드가 포함된 모든 표를 확인할 것
-- 운전 기록이 정말 없는 달인지, 아니면 PDF 파싱 실패인지 구분하여 추출
+Step 2. ECS Operation Time (최우선 — 운전 기준표)
+- 섹션명: "ECS Operation Time", "Operation Time Log", "OperationTimeReport" 등
+- 실제 컬럼: OPERATION │ START TIME │ END TIME │ RUNNING TIME(HH:MM) │ POSITION(GPS) │ VOLUME(m3) │ Line
+- 각 운전(BALLAST/DEBALLAST/STRIPPING)의 모든 행을 추출 (최대 30건)
+- ⚠️ 분석 기간(월) 전체를 스캔할 것. 특정 날짜에만 편중된 경우 문서를 처음부터 끝까지 재스캔
+- GPS 포맷 예시: [34, 54.13, N][127, 40.19, E] → "34°54.13'N, 127°40.19'E" 형태로 합쳐서 표기
+- RUNNING TIME이 HH:MM 형식이면 소수 시간(hour)으로 변환하여 run_time 필드에 입력 (예: 0:34 → 0.57)
 
-Step 3. EventLogReport — 이벤트 로그 파싱
-- ⚠️ PDF가 TOTAL LOG(통합본) 한 파일인 경우, 문서 전체를 처음부터 끝까지 스캔하여 이벤트 로그 섹션을 반드시 찾을 것
-- 섹션 제목은 "Operation Event Log", "Event Log", "Alarm List", "EventLogReport", "BWTS Log", "Event History" 등 다양하게 표기될 수 있음 — 제목에 관계없이 DATE·LEVEL·DESCRIPT 열이 있는 표를 찾아 파싱할 것
-- TOTAL LOG에서 "Operation Event Log" 섹션이 문서 앞쪽(2페이지 부근)에 위치하는 경우가 많으니 문서 초반부터 확인할 것
-- 자동 인식한 헤더를 기준으로 DATE, DEVICE, LEVEL, DESCRIPT를 매칭
-- DESCRIPT 열 텍스트에서 대괄호([])로 묶인 코드(예: [CODE201])를 찾아 'code' 필드에 분리할 것
-- 발생 날짜/시간, 레벨(Alarm/Trip/Warning/Normal), 코드, 설명 추출
-- 최대 60건으로 제한
-- ⚠️ 이벤트 로그 섹션을 끝까지 찾지 못한 경우에만 error_alarms를 빈 배열로 반환할 것. 섹션을 발견했다면 반드시 추출할 것
+Step 3. ECS Data Log (TRO 평균 계산 — 두 번째 우선순위)
+- 섹션명: "ECS DATA LOG", "Data Log", "DataReport", "BWTS Data" 등
+- TRO 컬럼은 선박마다 다름(T1, T2, TRO_B1 등) — 헤더에서 동적으로 식별할 것
+- 식별된 TRO 컬럼 값 중 0~15 사이(ppm)만 사용. 수백~수천 단위 전압/전류값과 절대 혼동 금지
 
-[반복 이벤트 처리]
-- Trip 이벤트는 무조건 전부 추출
-- 그 외(Warning/Alarm)는 동일 코드당 발생 시간순으로 최대 5건까지만 추출, 나머지 무시
-- EventLog가 방대한 경우에도 Step 3 파싱을 생략하지 말 것
+[TRO 평균 계산 규칙]
+① Step 2에서 확보한 각 운전의 시작시간·종료시간을 기준으로 해당 시간대 Data Log 행 추출
+② 아래 구간 제외 (배관 잔류수로 TRO 부정확):
+   - 운전 시작 후 첫 10분 이내
+   - 운전 종료 전 마지막 10분 이내
+③ 남은 "안정 구간" 값만 평균 → tro_data.ballasting_avg / deballasting_avg
+④ 운전 시간 20분 이하이거나 안정 구간 데이터 0개이면 → null
 
-[⚠️ VRCS 밸브 오작동 감지 특별 규칙]
-- 특정 밸브(예: [BA011F])가 수 초 단위의 짧은 시간 내에 'Valve Opened'와 'Valve Closed'를 무수히 반복하는 기록이 있다면 (Level 무관: Normal, Alarm, Warning 등 모두 포함), 개별 추출하지 마세요.
-- 해당 현상을 감지하면 반복 기록은 병합/무시하고, 대표로 단 1건만 아래와 같이 요약하여 추출하세요:
-  → code: "VRCS_ERR", description: "Valve Opened/Closed 반복 오작동 감지 [해당 밸브명]", level: "Warning"
+[알람 시점 센서 매칭]
+- 알람 발생 시각 기준 ±5분(없으면 ±15분) 이내 Data Log 행에서 sensor 값 추출
+- 여러 행 있으면 알람 시각에 가장 가까운 1개만 선택. ±15분도 없으면 null
 
-Step 4. DataReport (TRO 평균 계산 + 센서 매칭)
-- DataReport 섹션 제목은 "ECS DATA LOG", "Data Log", "DataReport", "BWTS Data" 등으로 표기될 수 있음 — 제목에 관계없이 TRO 수치가 포함된 표를 찾아 파싱할 것
+Step 4. Operation Event Log (참조 — 마지막 처리)
+- 섹션명: "Operation Event Log", "Event Log", "Alarm List", "EventLogReport" 등
+- DATE·LEVEL·DESCRIPT 열이 있는 표를 찾아 파싱
+- TOTAL LOG의 경우 "Operation Event Log"가 문서 앞쪽(2페이지 부근)에 위치하는 경우가 많음
+- DESCRIPT 열의 대괄호([]) 안 코드(예: [CODE201])를 'code' 필드에 분리
+- 추출 한도: Trip 전부 + Alarm/Warning 동일 코드당 최대 5건 (총 최대 60건)
+- ⚠️ 섹션을 발견했으면 반드시 추출. 끝까지 찾지 못한 경우에만 빈 배열 반환
 
-[TRO 평균 계산 — 핵심 규칙]
-① OperationTimeReport(또는 "Operation Time Log") 섹션에서 각 운전의 정확한 시작시간·종료시간 확인
-② DataReport(또는 "ECS DATA LOG") 섹션에서 해당 운전 시간 범위의 TRO 행을 추출
-   - TRO 컬럼은 선박마다 다름(T1, T2, TRO_B1 등) — 헤더에서 동적으로 식별할 것
-   - 식별된 TRO 컬럼 값 중 0~15 사이(ppm)만 사용. 수백~수천 단위 전압/전류값과 절대 혼동 금지
-③ 아래 구간은 반드시 제외 (배관 잔류수 영향으로 TRO 값이 부정확):
-   - 운전 시작 후 첫 10분 이내 데이터
-   - 운전 종료 전 마지막 10분 이내 데이터
-④ 제외 후 남은 "안정 구간" 데이터만 평균 계산 → tro_data.ballasting_avg / deballasting_avg
-⑤ 안정 구간 데이터가 없거나(운전시간 20분 이하) 데이터가 0개면 → null
+[⚠️ VRCS 밸브 오작동 감지 — Operation Event Log 및 Operation Time Log 양쪽 모두 확인]
+특정 밸브(예: [BA011F])가 수 초 단위로 'Valve Opened'/'Valve Closed'를 무수히 반복하는 기록이 있다면
+(Level 무관: Normal·Alarm·Warning 모두 포함), 반복 기록은 병합/무시하고 대표 1건만 추출:
+→ code: "VRCS_ERR", description: "Valve Opened/Closed 반복 오작동 감지 [해당 밸브명]", level: "Warning"
 
-[센서 매칭 (알람 발생 시점)]
-- 알람 발생 시각 기준 ±5분 이내 DataReport 행에서 sensor 값 추출
-- 여러 행이 있으면 알람 시각에 가장 가까운 1개 행만 선택
-- ±5분 내 데이터 없으면 ±15분 이내에서 가장 가까운 1개 추출
-- ±15분도 없으면 해당 필드 null
+[⚠️ Event Log 과다 경고]
+Operation Event Log 총 항목 수가 100건을 초과하는 경우, error_alarms 배열 마지막에 아래 항목 추가:
+→ code: "LOG_OVERFLOW", description: "Event Log 항목이 100건을 초과합니다. 전체 로그 별도 검토 필요.", level: "Warning", date: null, time: null
 
-[확인 불가 항목은 null로 표시]
-[문자열 값에 줄바꿈 문자 포함 금지]
+[확인 불가 항목은 null로 표시. 문자열 값에 줄바꿈 문자 포함 금지]
 
 ${STAGE1_TEXT_SCHEMA}
 `.trim();
@@ -257,6 +243,7 @@ CRITICAL (하나라도 해당):
   * CODE701 (Comm Fail): PLC 및 모듈 간 통신 케이블 연결 상태 확인 권장
   * CODE721 (Valve Opened/Failed): 해당 밸브의 공압 상태 및 리미트 스위치 점검 권장
   * VRCS_ERR (밸브 개폐 반복 오작동): 수 초 간격으로 밸브가 열림/닫힘을 반복한 채터링(Chattering) 현상 감지. 공압 라인 불량 또는 밸브 리미트 스위치 접점 불량/VRCS 통신 오류가 강력히 의심됨. ⚠️ 즉각적인 해당 밸브 하드웨어 점검 및 수리를 강력 권고.
+  * LOG_OVERFLOW (Event Log 100건 초과): 이벤트 로그가 비정상적으로 과다하게 발생했음. 반복성 알람 또는 밸브 오작동이 지속되고 있을 가능성이 높으므로 전체 로그 상세 검토 및 원인 파악 권고. overall_status는 최소 WARNING으로 판정.
 - 예시: "당월 주입 3회/배출 2회 운전. 주입 평균 TRO 6.2ppm으로 정상 범위(5~10ppm) 내 유지. CODE200(TRO 저하) Alarm 3건 발생 — CLX 시약 상태 확인 권장."
 
 [ai_remarks_en 작성 지침]
