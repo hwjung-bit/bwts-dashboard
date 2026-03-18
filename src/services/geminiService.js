@@ -166,7 +166,8 @@ Step 2. OperationTimeReport
 
 Step 3. EventLogReport — 이벤트 로그 파싱
 - ⚠️ PDF가 TOTAL LOG(통합본) 한 파일인 경우, 문서 전체를 처음부터 끝까지 스캔하여 이벤트 로그 섹션을 반드시 찾을 것
-- 섹션 제목은 "Event Log", "Alarm List", "EventLogReport", "BWTS Log", "Event History" 등 다양하게 표기될 수 있음 — 제목에 관계없이 DATE·LEVEL·DESCRIPT 열이 있는 표를 찾아 파싱할 것
+- 섹션 제목은 "Operation Event Log", "Event Log", "Alarm List", "EventLogReport", "BWTS Log", "Event History" 등 다양하게 표기될 수 있음 — 제목에 관계없이 DATE·LEVEL·DESCRIPT 열이 있는 표를 찾아 파싱할 것
+- TOTAL LOG에서 "Operation Event Log" 섹션이 문서 앞쪽(2페이지 부근)에 위치하는 경우가 많으니 문서 초반부터 확인할 것
 - 자동 인식한 헤더를 기준으로 DATE, DEVICE, LEVEL, DESCRIPT를 매칭
 - DESCRIPT 열 텍스트에서 대괄호([])로 묶인 코드(예: [CODE201])를 찾아 'code' 필드에 분리할 것
 - 발생 날짜/시간, 레벨(Alarm/Trip/Warning/Normal), 코드, 설명 추출
@@ -184,10 +185,11 @@ Step 3. EventLogReport — 이벤트 로그 파싱
   → code: "VRCS_ERR", description: "Valve Opened/Closed 반복 오작동 감지 [해당 밸브명]", level: "Warning"
 
 Step 4. DataReport (TRO 평균 계산 + 센서 매칭)
+- DataReport 섹션 제목은 "ECS DATA LOG", "Data Log", "DataReport", "BWTS Data" 등으로 표기될 수 있음 — 제목에 관계없이 TRO 수치가 포함된 표를 찾아 파싱할 것
 
 [TRO 평균 계산 — 핵심 규칙]
-① OperationTimeReport에서 각 운전의 정확한 시작시간·종료시간 확인
-② DataReport에서 해당 운전 시간 범위의 TRO 행을 추출
+① OperationTimeReport(또는 "Operation Time Log") 섹션에서 각 운전의 정확한 시작시간·종료시간 확인
+② DataReport(또는 "ECS DATA LOG") 섹션에서 해당 운전 시간 범위의 TRO 행을 추출
    - TRO 컬럼은 선박마다 다름(T1, T2, TRO_B1 등) — 헤더에서 동적으로 식별할 것
    - 식별된 TRO 컬럼 값 중 0~15 사이(ppm)만 사용. 수백~수천 단위 전압/전류값과 절대 혼동 금지
 ③ 아래 구간은 반드시 제외 (배관 잔류수 영향으로 TRO 값이 부정확):
@@ -245,13 +247,22 @@ CRITICAL (하나라도 해당):
 
 [ai_remarks 작성 지침]
 - 반드시 구체적 숫자 포함: 운전 횟수, TRO 평균값(ppm), 주요 알람 코드 및 발생 건수
+- 배출(De-ballasting) TRO가 0.00ppm에 가까운 것은 정상적인 중화 결과이므로 문제 삼지 말 것
 - 수치 없는 포괄적 서술 금지 ("전반적으로 정상", "문제없이 완료" 등)
-- 100% 한국어 작성 (BWTS, TRO, Alarm 등 고유명사 제외)
+- 100% 한국어 작성 (BWTS, TRO, Alarm, Trip, Code 등 고유명사 제외)
+- 알람 발생 시 아래 코드별 조치 권고사항을 반드시 포함할 것:
+  * CODE200 (TRO Low): CLX 시약 상태 점검 및 샘플링 라인 확인 권장
+  * CODE201 (TRO High): 중화제(Sodium Thiosulfate) 주입 펌프 및 탱크 레벨 확인 권장
+  * CODE301/302/303 (ANU Tank Level): 중화제 탱크 레벨 센서 및 밸브 점검 권장
+  * CODE701 (Comm Fail): PLC 및 모듈 간 통신 케이블 연결 상태 확인 권장
+  * CODE721 (Valve Opened/Failed): 해당 밸브의 공압 상태 및 리미트 스위치 점검 권장
+  * VRCS_ERR (밸브 개폐 반복 오작동): 수 초 간격으로 밸브가 열림/닫힘을 반복한 채터링(Chattering) 현상 감지. 공압 라인 불량 또는 밸브 리미트 스위치 접점 불량/VRCS 통신 오류가 강력히 의심됨. ⚠️ 즉각적인 해당 밸브 하드웨어 점검 및 수리를 강력 권고.
 - 예시: "당월 주입 3회/배출 2회 운전. 주입 평균 TRO 6.2ppm으로 정상 범위(5~10ppm) 내 유지. CODE200(TRO 저하) Alarm 3건 발생 — CLX 시약 상태 확인 권장."
 
 [ai_remarks_en 작성 지침]
 - ai_remarks와 동일한 내용을 영어로 작성 (본선 발송 이메일용)
 - Must include specific numbers: operation count, TRO average (ppm), alarm code counts
+- VRCS_ERR example: "Valve chattering detected on [valve name] — strongly recommend immediate hardware inspection of pneumatic line and limit switch."
 - Example: "3 ballasting / 2 deballasting operations this month. Average TRO 6.2ppm within normal range (5~10ppm). CODE200 (TRO Low) Alarm×3 — recommend checking CLX reagent condition."
 
 [주의사항]
