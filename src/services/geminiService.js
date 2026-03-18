@@ -1266,10 +1266,10 @@ export async function analyzePdfFromDrive(fileIds, accessToken, vessel = {}) {
         tro_data: { ballasting_avg: null, deballasting_avg: null },
         error_alarms: [],
         overall_status: "WARNING",
-        ai_remarks: pageNote,
-        ai_remarks_en: splitInfo?.totalPages
+        ai_remarks: [pageNote],
+        ai_remarks_en: [splitInfo?.totalPages
           ? `Original ${splitInfo.totalPages}-page TOTAL LOG — analysis failed even after auto-split. Please upload sections as separate files.`
-          : "PDF too large or file error — analysis unavailable. Please upload sections as separate files.",
+          : "PDF too large or file error — analysis unavailable. Please upload sections as separate files."],
       });
     }
   }
