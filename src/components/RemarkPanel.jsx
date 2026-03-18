@@ -8,6 +8,7 @@ export default function RemarkPanel({ vessel, analysisResult, accessToken, onUpd
   const lang = vessel?.mailLang || "ko";
   const [note, setNote]     = useState(vessel?.reviewNote || "");
   const [remark, setRemark] = useState(vessel?.reviewRemark || "");
+  const [normalCheck, setNormalCheck] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError]     = useState("");
 
@@ -46,16 +47,7 @@ export default function RemarkPanel({ vessel, analysisResult, accessToken, onUpd
     onUpdate?.({
       reviewNote: note,
       reviewRemark: remark,
-      analysisStatus: "REVIEWED",
-      reviewedAt: new Date().toISOString(),
-    });
-  }
-
-  function handleMarkNormal() {
-    onUpdate?.({
-      reviewNote: note,
-      reviewRemark: remark,
-      analysisStatus: "NORMAL",
+      analysisStatus: normalCheck ? "NORMAL" : "REVIEWED",
       reviewedAt: new Date().toISOString(),
     });
   }
@@ -135,18 +127,27 @@ export default function RemarkPanel({ vessel, analysisResult, accessToken, onUpd
         </button>
         {!isReviewed && analysisResult && (
           <>
-            <button
-              onClick={handleMarkNormal}
-              className="px-4 py-2 text-sm bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors"
-              title="이상 없음 — 주의/이상 상태를 정상으로 처리"
-            >
-              ✅ 정상 확인
-            </button>
+            <label className="flex items-center gap-2 px-3 py-2 text-sm bg-green-50 border border-green-200 rounded-lg cursor-pointer select-none hover:bg-green-100 transition-colors">
+              <input
+                type="checkbox"
+                checked={normalCheck}
+                onChange={(e) => setNormalCheck(e.target.checked)}
+                className="w-4 h-4 accent-green-600"
+              />
+              <div className="flex flex-col leading-tight">
+                <span className="text-green-700 font-medium">✅ 정상 확인</span>
+                <span className="text-green-500 text-xs">체크 시 주의/이상 → 정상 처리</span>
+              </div>
+            </label>
             <button
               onClick={handleMarkReviewed}
-              className="px-4 py-2 text-sm bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors"
+              className={`px-4 py-2 text-sm text-white rounded-lg transition-colors ${
+                normalCheck
+                  ? "bg-green-600 hover:bg-green-700"
+                  : "bg-indigo-600 hover:bg-indigo-700"
+              }`}
             >
-              ✓ 검토 완료
+              {normalCheck ? "✅ 정상으로 검토 완료" : "✓ 검토 완료"}
             </button>
           </>
         )}
