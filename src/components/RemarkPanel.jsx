@@ -134,10 +134,7 @@ export default function RemarkPanel({ vessel, analysisResult, accessToken, onUpd
                 onChange={(e) => setNormalCheck(e.target.checked)}
                 className="w-4 h-4 accent-green-600"
               />
-              <div className="flex flex-col leading-tight">
-                <span className="text-green-700 font-medium">✅ 정상 확인</span>
-                <span className="text-green-500 text-xs">체크 시 주의/이상 → 정상 처리</span>
-              </div>
+              <span className="text-green-700 font-medium">정상 확인</span>
             </label>
             <button
               onClick={handleMarkReviewed}
@@ -147,7 +144,7 @@ export default function RemarkPanel({ vessel, analysisResult, accessToken, onUpd
                   : "bg-indigo-600 hover:bg-indigo-700"
               }`}
             >
-              {normalCheck ? "✅ 정상으로 검토 완료" : "✓ 검토 완료"}
+              {normalCheck ? "정상으로 검토 완료" : "✓ 검토 완료"}
             </button>
           </>
         )}
