@@ -24,32 +24,32 @@ const STAGE1_TEXT_SCHEMA = `{
       "operation_mode": "BALLAST 또는 DEBALLAST 또는 STRIPPING",
       "start_time": "시작 시간 (HH:MM, 없으면 null)",
       "end_time": "종료 시간 (HH:MM, 없으면 null)",
-      "ballast_volume": "주입량 (m³, 없으면 null)",
-      "deballast_volume": "배출량 (m³, 없으면 null)",
+      "ballast_volume": "주입량 (m³, 표에서 식별된 VOLUME 또는 TON 값, 없으면 null)",
+      "deballast_volume": "배출량 (m³, 표에서 식별된 VOLUME 또는 TON 값, 없으면 null)",
       "run_time": "운전 시간 (hour, 없으면 null)",
-      "location_gps": "GPS 위치 (없으면 null)"
+      "location_gps": "GPS 위치 ([LAT][LON] 형태면 '위도, 경도'로 합쳐서 표기, 없으면 null)"
     }
   ],
   "tro_data": {
-    "ballasting_avg": "주입(Ballasting) 안정 구간 평균 TRO (ppm) — 운전 시작 후 10분·종료 전 10분 제외. 해당 구간 없으면 null",
-    "deballasting_avg": "배출(De-ballasting) 안정 구간 평균 TRO (ppm) — 운전 시작 후 10분·종료 전 10분 제외. 해당 구간 없으면 null"
+    "ballasting_avg": "주입(Ballasting) 안정 구간 평균 TRO (ppm). (동적으로 식별된 T1, T2, TRO_B1 등 모든 TRO 센서들의 0~15 사이 값들의 평균). 없으면 null",
+    "deballasting_avg": "배출(De-ballasting) 안정 구간 평균 TRO (ppm). (동적으로 식별된 TRO 센서들의 0~15 사이 값 평균). 없으면 null"
   },
   "sensor_data": {
     "gds_max": "수소가스 최대값 (% LEL, 없으면 null)",
-    "csu_avg": "해수 전도도 평균 (mS/cm, 없으면 null)",
+    "csu_avg": "해수 전도도 평균 (mS/cm 또는 PSU, 없으면 null)",
     "fts_max": "냉각수 온도 최대값 (°C, 없으면 null)"
   },
   "error_alarms": [
     {
-      "code": "에러 코드",
-      "description": "에러 내용",
+      "code": "에러 코드 (DESCRIPT 열의 대괄호 안 내용, 예: CODE201. 밸브 오작동의 경우 VRCS_ERR)",
+      "description": "에러 내용 (코드 제외한 나머지 텍스트)",
       "level": "Alarm 또는 Trip 또는 Warning",
       "date": "발생 날짜 (YYYY-MM-DD 또는 null)",
       "time": "발생 시간 (HH:MM 또는 null)",
       "sensor_at_event": {
         "rec_voltage": "발생 당시 정류기 전압 (V, 없으면 null)",
-        "rec_current": "발생 당시 정류기 전류 (A, 없으면 null)",
-        "tro": "발생 당시 TRO 값 (ppm, 없으면 null)",
+        "rec_current": "발생 당시 정류기 전류 (A, 수백~수천 단위, 없으면 null)",
+        "tro": "발생 당시 TRO 값 (ppm, 동적으로 식별된 TRO 센서들의 0~15 사이 값, 없으면 null)",
         "location_gps": "발생 당시 GPS (없으면 null)"
       }
     }
@@ -133,7 +133,12 @@ const EXTRACTION_PROMPT = (vessel = {}) => `
 숫자·날짜·코드만 있는 그대로 추출하세요. 해석하거나 판단하지 마세요.
 JSON 외의 텍스트는 절대 포함하지 마세요.
 
-[데이터 파싱 방법]
+[2단계 동적 파싱 방법] ← 반드시 준수
+선박 및 장비 옵션에 따라 표의 센서 구성(TRO1, TRO2, FMU1, CSU 등)이 달라지므로 열 순서를 고정하거나 추측하지 마세요.
+1. 헤더 자동 인식: 각 표에서 가장 첫 번째 줄(영문 대문자 항목들)을 기준 헤더(Column Name)로 먼저 파악
+2. Key-Value 매칭: 표의 행이 깨져 보이더라도 줄바꿈·여백 기준으로 데이터를 인식하여 헤더와 짝지을 것
+
+[데이터 파싱 보조 규칙]
 - PDF에서 추출된 텍스트는 표(Table) 형식이 깨져 값, 값 형태로 나열될 수 있음
 - 줄바꿈과 콤마를 기준으로 열(Column)과 행(Row)을 지능적으로 복원해서 읽을 것
 - 'Report', 'Log'가 이름에 포함된 파일의 데이터를 우선 읽고, 매뉴얼/도면 파일은 무시
@@ -162,6 +167,8 @@ Step 2. OperationTimeReport
 Step 3. EventLogReport — 이벤트 로그 파싱
 - EventLog 데이터는 별도 EventLogReport 파일에 있을 수도 있고,
   통합 리포트 PDF 내 "Event Log" 섹션으로 포함될 수도 있음 — 양쪽 모두 확인할 것
+- 자동 인식한 헤더를 기준으로 DATE, DEVICE, LEVEL, DESCRIPT를 매칭
+- DESCRIPT 열 텍스트에서 대괄호([])로 묶인 코드(예: [CODE201])를 찾아 'code' 필드에 분리할 것
 - 발생 날짜/시간, 레벨(Alarm/Trip/Warning/Normal), 코드, 설명 추출
 - 최대 60건으로 제한
 
@@ -170,11 +177,18 @@ Step 3. EventLogReport — 이벤트 로그 파싱
 - 그 외(Warning/Alarm)는 동일 코드당 발생 시간순으로 최대 5건까지만 추출, 나머지 무시
 - EventLog가 방대한 경우 DataReport·OperationTimeReport·GeneralReport 파싱에 토큰 집중
 
+[⚠️ VRCS 밸브 오작동 감지 특별 규칙]
+- 특정 밸브(예: [BA011F])가 수 초 단위의 짧은 시간 내에 'Valve Opened'와 'Valve Closed'를 무수히 반복하는 기록이 있다면 (Level 무관: Normal, Alarm, Warning 등 모두 포함), 개별 추출하지 마세요.
+- 해당 현상을 감지하면 반복 기록은 병합/무시하고, 대표로 단 1건만 아래와 같이 요약하여 추출하세요:
+  → code: "VRCS_ERR", description: "Valve Opened/Closed 반복 오작동 감지 [해당 밸브명]", level: "Warning"
+
 Step 4. DataReport (TRO 평균 계산 + 센서 매칭)
 
 [TRO 평균 계산 — 핵심 규칙]
 ① OperationTimeReport에서 각 운전의 정확한 시작시간·종료시간 확인
 ② DataReport에서 해당 운전 시간 범위의 TRO 행을 추출
+   - TRO 컬럼은 선박마다 다름(T1, T2, TRO_B1 등) — 헤더에서 동적으로 식별할 것
+   - 식별된 TRO 컬럼 값 중 0~15 사이(ppm)만 사용. 수백~수천 단위 전압/전류값과 절대 혼동 금지
 ③ 아래 구간은 반드시 제외 (배관 잔류수 영향으로 TRO 값이 부정확):
    - 운전 시작 후 첫 10분 이내 데이터
    - 운전 종료 전 마지막 10분 이내 데이터
@@ -385,7 +399,8 @@ const VALVE_CODES   = /^7[2-3]\d$/;
 function appendValveWarning(data) {
   const alarms = data.error_alarms || [];
   const valveAlarms = alarms.filter((a) =>
-    VALVE_PATTERN.test(a.description || "") || VALVE_CODES.test(String(a.code || ""))
+    (VALVE_PATTERN.test(a.description || "") || VALVE_CODES.test(String(a.code || "")))
+    && a.code !== "VRCS_ERR" // AI가 이미 요약 처리한 채터링 항목은 중복 카운트 제외
   );
   if (valveAlarms.length === 0) return;
 

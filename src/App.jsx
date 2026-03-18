@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { CONFIG, INITIAL_VESSELS } from "./config.js";
 import { readVessels, writeVessels } from "./services/sheetsService.js";
 import Dashboard from "./components/Dashboard.jsx";
@@ -45,6 +45,7 @@ export default function App() {
   const [userEmail, setUserEmail]     = useState(null);
   const [authError, setAuthError]     = useState("");
   const [authLoading, setAuthLoading] = useState(false);
+  const [autoLoginDone, setAutoLoginDone] = useState(false);
   const [showManager, setShowManager] = useState(false);
   const [sheetsError, setSheetsError] = useState("");
 
@@ -65,53 +66,80 @@ export default function App() {
     });
   }, [accessToken]);
 
+  // 로그인 성공 후 공통 처리
+  async function onLoginSuccess(token, email) {
+    localStorage.setItem("bwts_user_email", email);
+    setAccessToken(token);
+    setUserEmail(email);
+    if (CONFIG.SHEETS_ID) {
+      try {
+        const sheetVessels = await readVessels(CONFIG.SHEETS_ID, token);
+        if (sheetVessels.length > 0) {
+          setVesselsRaw(sheetVessels);
+          saveVessels(sheetVessels);
+          setSheetsError("");
+        } else {
+          const localVessels = loadVessels() || INITIAL_VESSELS;
+          writeVessels(CONFIG.SHEETS_ID, localVessels, token).catch(console.warn);
+          setSheetsError("Sheets가 비어있어 로컬 데이터를 사용합니다.");
+        }
+      } catch (e) {
+        setSheetsError(`Sheets 로드 실패: ${e.message}`);
+      }
+    }
+    setAuthLoading(false);
+  }
+
+  // GIS 토큰 클라이언트 초기화 (prompt 제어용)
+  async function requestToken(silent = false) {
+    await loadGsi();
+    return new Promise((resolve, reject) => {
+      const client = window.google.accounts.oauth2.initTokenClient({
+        client_id: CONFIG.GOOGLE_CLIENT_ID,
+        scope: CONFIG.SCOPES,
+        prompt: silent ? "" : undefined,
+        callback: (tokenResponse) => {
+          if (tokenResponse.error) reject(new Error(tokenResponse.error));
+          else resolve(tokenResponse.access_token);
+        },
+        error_callback: (err) => reject(new Error(err?.type || "auth_error")),
+      });
+      client.requestAccessToken(silent ? { prompt: "" } : {});
+    });
+  }
+
+  // 페이지 로드 시 자동 재로그인 (이전에 로그인한 적 있는 경우)
+  useEffect(() => {
+    const savedEmail = localStorage.getItem("bwts_user_email");
+    if (!savedEmail) { setAutoLoginDone(true); return; }
+    setAuthLoading(true);
+    requestToken(true)
+      .then((token) => fetchUserEmail(token).then((email) => {
+        if (email && email.endsWith("@ekmtc.com")) return onLoginSuccess(token, email);
+        localStorage.removeItem("bwts_user_email");
+        setAuthLoading(false);
+      }))
+      .catch(() => {
+        // 자동 로그인 실패 시 로그인 화면 표시 (에러 노출 없이)
+        setAuthLoading(false);
+      })
+      .finally(() => setAutoLoginDone(true));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function handleLogin() {
     setAuthLoading(true);
     setAuthError("");
     try {
-      await loadGsi();
-      const client = window.google.accounts.oauth2.initTokenClient({
-        client_id: CONFIG.GOOGLE_CLIENT_ID,
-        scope: CONFIG.SCOPES,
-        callback: (tokenResponse) => {
-          if (tokenResponse.error) {
-            setAuthError(`인증 오류: ${tokenResponse.error}`);
-            setAuthLoading(false);
-            return;
-          }
-          const token = tokenResponse.access_token;
-          fetchUserEmail(token).then(async (email) => {
-            if (!email || !email.endsWith("@ekmtc.com")) {
-              window.google?.accounts?.oauth2?.revoke(token);
-              setAuthError("회사 계정(@ekmtc.com)으로만 접속 가능합니다.");
-              setAuthLoading(false);
-              return;
-            }
-            setAccessToken(token);
-            setUserEmail(email);
-            // Sheets에서 선박 목록 로드 (SHEETS_ID가 설정된 경우)
-            if (CONFIG.SHEETS_ID) {
-              try {
-                const sheetVessels = await readVessels(CONFIG.SHEETS_ID, token);
-                if (sheetVessels.length > 0) {
-                  setVesselsRaw(sheetVessels);
-                  saveVessels(sheetVessels);
-                  setSheetsError("");
-                } else {
-                  // Sheets가 비어있으면 로컬 데이터를 Sheets에 업로드
-                  const localVessels = loadVessels() || INITIAL_VESSELS;
-                  writeVessels(CONFIG.SHEETS_ID, localVessels, token).catch(console.warn);
-                  setSheetsError("Sheets가 비어있어 로컬 데이터를 사용합니다.");
-                }
-              } catch (e) {
-                setSheetsError(`Sheets 로드 실패: ${e.message}`);
-              }
-            }
-            setAuthLoading(false);
-          });
-        },
-      });
-      client.requestAccessToken();
+      const token = await requestToken(false);
+      const email = await fetchUserEmail(token);
+      if (!email || !email.endsWith("@ekmtc.com")) {
+        window.google?.accounts?.oauth2?.revoke(token);
+        setAuthError("회사 계정(@ekmtc.com)으로만 접속 가능합니다.");
+        setAuthLoading(false);
+        return;
+      }
+      await onLoginSuccess(token, email);
     } catch (e) {
       setAuthError(`로그인 실패: ${e.message}`);
       setAuthLoading(false);
@@ -122,6 +150,7 @@ export default function App() {
     if (accessToken && window.google?.accounts?.oauth2) {
       window.google.accounts.oauth2.revoke(accessToken);
     }
+    localStorage.removeItem("bwts_user_email");
     setAccessToken(null);
     setUserEmail(null);
   }
@@ -223,18 +252,48 @@ export default function App() {
           </div>
         )}
 
-        {!accessToken && isConfigured && (
-          <div className="mb-6 bg-blue-50 border border-blue-200 rounded-xl px-5 py-4 text-sm text-blue-700">
-            Google Drive와 Gmail에 접근하려면 오른쪽 상단의 <strong>Google 로그인</strong>을 클릭하세요.
+        {!autoLoginDone ? (
+          <div className="flex items-center justify-center min-h-[60vh]">
+            <span className="w-6 h-6 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin" />
+          </div>
+        ) : accessToken ? (
+          <Dashboard
+            vessels={vessels}
+            setVessels={setVessels}
+            accessToken={accessToken}
+            isAdmin={isAdmin}
+          />
+        ) : (
+          <div className="flex flex-col items-center justify-center min-h-[60vh] gap-6">
+            <div className="bg-white border border-slate-200 rounded-2xl shadow-sm px-10 py-10 flex flex-col items-center gap-5 max-w-sm w-full">
+              <span className="text-5xl">🚢</span>
+              <div className="text-center">
+                <div className="font-bold text-slate-800 text-lg mb-1">BWTS LOG ANALYZER</div>
+                <div className="text-slate-500 text-sm">회사 계정으로 로그인하여 이용하세요</div>
+              </div>
+              {authError && (
+                <div className="w-full bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-600 text-center">
+                  {authError}
+                </div>
+              )}
+              <button
+                onClick={handleLogin}
+                disabled={authLoading || !isConfigured}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 text-white text-sm font-medium rounded-xl transition-colors"
+              >
+                {authLoading ? (
+                  <>
+                    <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                    인증중...
+                  </>
+                ) : (
+                  <>🔑 Google 로그인 (@ekmtc.com)</>
+                )}
+              </button>
+              <p className="text-xs text-slate-400 text-center">ekmtc.com 도메인 계정만 접근 가능합니다</p>
+            </div>
           </div>
         )}
-
-        <Dashboard
-          vessels={vessels}
-          setVessels={setVessels}
-          accessToken={accessToken}
-          isAdmin={isAdmin}
-        />
       </main>
 
       {showManager && isAdmin && (
