@@ -125,7 +125,7 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
 
     setAnalyzingVesselId(vesselId);
     setAnalyzeError("");
-    updateMonthlyVessel(vesselId, { analysisStatus: "LOADING", analysisError: null });
+    updateMonthlyVessel(vesselId, { analysisStatus: "LOADING", analysisError: null, analysisResult: null });
     try {
       const monthData = await collectMonthData(CONFIG.DRIVE_ROOT_FOLDER_ID, year, month, accessToken);
       const mk = (vessel.vesselCode || vessel.name).toLowerCase();
@@ -249,7 +249,7 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
           // 폴더 있는 선박만 LOADING → 분석
           const displayName = vessel.vesselCode || vessel.name;
           setAnalyzingNames((prev) => [...prev, displayName]);
-          updateMonthlyVessel(vessel.id, { analysisStatus: "LOADING" });
+          updateMonthlyVessel(vessel.id, { analysisStatus: "LOADING", analysisResult: null, analysisError: null });
           try {
             const logPdfs = filterLogPdfs(entry.pdfs);
             const result = await analyzePdfFromDrive(logPdfs.map((p) => p.id), accessToken, vessel);
