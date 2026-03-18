@@ -46,6 +46,7 @@ export default function App() {
   const [authError, setAuthError]     = useState("");
   const [authLoading, setAuthLoading] = useState(false);
   const [showManager, setShowManager] = useState(false);
+  const [sheetsError, setSheetsError] = useState("");
 
   const isAdmin = userEmail && CONFIG.ADMIN_EMAIL !== "YOUR_ADMIN_EMAIL@gmail.com"
     ? userEmail === CONFIG.ADMIN_EMAIL
@@ -95,13 +96,15 @@ export default function App() {
                 if (sheetVessels.length > 0) {
                   setVesselsRaw(sheetVessels);
                   saveVessels(sheetVessels);
+                  setSheetsError("");
                 } else {
                   // Sheets가 비어있으면 로컬 데이터를 Sheets에 업로드
                   const localVessels = loadVessels() || INITIAL_VESSELS;
                   writeVessels(CONFIG.SHEETS_ID, localVessels, token).catch(console.warn);
+                  setSheetsError("Sheets가 비어있어 로컬 데이터를 사용합니다.");
                 }
               } catch (e) {
-                console.warn("Sheets 선박 로드 실패, 로컬 데이터 사용:", e.message);
+                setSheetsError(`Sheets 로드 실패: ${e.message}`);
               }
             }
             setAuthLoading(false);
@@ -211,6 +214,12 @@ export default function App() {
         {authError && (
           <div className="mb-4 bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-600">
             {authError}
+          </div>
+        )}
+        {sheetsError && (
+          <div className="mb-4 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-700 flex justify-between items-center">
+            <span>⚠️ {sheetsError}</span>
+            <button onClick={() => setSheetsError("")} className="text-amber-400 hover:text-amber-600 ml-4">✕</button>
           </div>
         )}
 
