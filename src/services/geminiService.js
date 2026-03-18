@@ -218,12 +218,14 @@ NORMAL (모두 해당 시):
 - 동일 코드 알람 2건 이하
 - TRO 주입(Ballasting) 안정 구간 평균 5~10ppm 유지
 - TRO 배출(De-ballasting) 안정 구간 평균 0.1ppm 미만(IMO 기준)
-- 데이터 일부 누락(null)은 NORMAL 판정에 영향 없음
+- 데이터 누락(null)이 전체 주요 필드(operations, tro_data, error_alarms)의 30% 미만
 
-WARNING:
+WARNING (하나라도 해당):
 - Trip 없이 동일 코드 알람 3~4건 발생
-- TRO가 기준 범위에서 일시적으로 벗어났으나 운전은 정상 완료
-- 데이터 기록 누락 다수
+- TRO 주입이 정상 범위(5~10ppm)에서 일시적으로 벗어남
+- TRO 배출(De-ballasting) 기준(0.1ppm) 초과가 1~2회 발생
+- 데이터 누락(null)이 전체 주요 필드의 30% 이상
+- 이벤트 로그 100건 초과(LOG_OVERFLOW) 감지
 
 CRITICAL (하나라도 해당):
 - Trip 이벤트 1건 이상 발생
@@ -242,7 +244,7 @@ CRITICAL (하나라도 해당):
   * CODE301/302/303 (ANU Tank Level): 중화제 탱크 레벨 센서 및 밸브 점검 권장
   * CODE701 (Comm Fail): PLC 및 모듈 간 통신 케이블 연결 상태 확인 권장
   * CODE721 (Valve Opened/Failed): 해당 밸브의 공압 상태 및 리미트 스위치 점검 권장
-  * VRCS_ERR (밸브 개폐 반복 오작동): 수 초 간격으로 밸브가 열림/닫힘을 반복한 채터링(Chattering) 현상 감지. 공압 라인 불량 또는 밸브 리미트 스위치 접점 불량/VRCS 통신 오류가 강력히 의심됨. ⚠️ 즉각적인 해당 밸브 하드웨어 점검 및 수리를 강력 권고.
+  * VRCS_ERR (밸브 개폐 반복 오작동): 수 초 간격으로 밸브가 열림/닫힘을 반복한 채터링(Chattering) 현상 감지. 공압 라인 불량 또는 밸브 리미트 스위치 접점 불량/VRCS 통신 오류가 강력히 의심됨. [긴급] 즉각적인 해당 밸브 하드웨어 점검 및 수리를 강력 권고.
   * LOG_OVERFLOW (Event Log 100건 초과): 이벤트 로그가 비정상적으로 과다하게 발생했음. 반복성 알람 또는 밸브 오작동이 지속되고 있을 가능성이 높으므로 전체 로그 상세 검토 및 원인 파악 권고. overall_status는 최소 WARNING으로 판정.
 - 예시: "당월 주입 3회/배출 2회 운전. 주입 평균 TRO 6.2ppm으로 정상 범위(5~10ppm) 내 유지. CODE200(TRO 저하) Alarm 3건 발생 — CLX 시약 상태 확인 권장."
 
@@ -255,6 +257,7 @@ CRITICAL (하나라도 해당):
 [주의사항]
 - 불확실한 경우 CRITICAL보다 WARNING/NORMAL 우선
 - 문자열 값에 줄바꿈 문자 포함 금지 (한 줄로 작성)
+- 출력 JSON은 반드시 아래 3개 키만 포함하고 다른 키는 절대 추가하지 마세요.
 
 {"overall_status": "NORMAL 또는 WARNING 또는 CRITICAL", "ai_remarks": "...", "ai_remarks_en": "..."}
 `.trim();
@@ -309,6 +312,7 @@ ${operatorNote || "(없음)"}
 - "~가능성이 있습니다", "~의심됩니다", "~권장합니다" 어조 사용
 - "~고장입니다", "~문제입니다" 단정 표현 금지
 - 현장에서 직접 확인 가능한 구체적 점검 항목 포함
+- 담당자 메모가 없을 경우 알람 정보만을 바탕으로 기술적 리마크를 작성하세요. 메모가 없다는 언급은 하지 마세요.
 - ${langInstr}
 
 JSON 형식으로 응답하세요 (줄바꿈은 \\n으로 표현):
@@ -411,12 +415,17 @@ function appendValveWarning(data) {
   if (totalCount < 5) return;
 
   const codes = [...new Set(valveAlarms.map((a) => a.code).filter(Boolean))].join(", ");
-  const note = `CODE(${codes}) 밸브 비정상 동작 총 ${totalCount}회 감지 — 해당 밸브 개도 설정 및 센서 점검 권장.`;
+  const isCritical = (data.overall_status === "CRITICAL") || totalCount >= 10;
+  const note = isCritical
+    ? `CODE(${codes}) 밸브 비정상 동작 총 ${totalCount}회 감지 — [긴급] 해당 밸브 즉각 점검 필요 (CRITICAL 수준).`
+    : `CODE(${codes}) 밸브 비정상 동작 총 ${totalCount}회 감지 — 해당 밸브 개도 설정 및 센서 점검 권장.`;
   if (data.ai_remarks && !data.ai_remarks.includes("밸브 비정상")) {
     data.ai_remarks += " " + note;
   }
-  if (data.ai_remarks_en && !data.ai_remarks_en.includes("valve")) {
-    const noteEn = `CODE(${codes}) Valve abnormal operation detected ${totalCount} times — recommend checking valve position and feedback sensor.`;
+  if (data.ai_remarks_en && !data.ai_remarks_en.includes("Valve abnormal")) {
+    const noteEn = isCritical
+      ? `CODE(${codes}) Valve abnormal operation detected ${totalCount} times — [URGENT] immediate valve inspection required (CRITICAL level).`
+      : `CODE(${codes}) Valve abnormal operation detected ${totalCount} times — recommend checking valve position and feedback sensor.`;
     data.ai_remarks_en += " " + noteEn;
   }
 }
@@ -454,6 +463,9 @@ function recalcOverallStatus(data) {
   const alarms = data.error_alarms || [];
   const tro    = data.tro_data    || {};
 
+  // AI 원본 판정 기록 (escalation 감지용)
+  const aiStatus = (data.overall_status || "").toUpperCase();
+
   // Trip 건수
   const tripCount = alarms.filter((a) => (a.level || "").toLowerCase() === "trip").length;
 
@@ -467,27 +479,49 @@ function recalcOverallStatus(data) {
   const troBallastBad   = tro.ballasting_avg   != null && (tro.ballasting_avg < 5 || tro.ballasting_avg > 10);
   const troDeballastBad = tro.deballasting_avg  != null && tro.deballasting_avg > 0.1;
 
-  // TRO null → 실제 운전이 있었을 때만 WARNING (운전 없는 달은 제외)
-  const ops         = data.operations || [];
-  const hadBallast  = ops.some((o) => /BALLAST/i.test(o.operation_mode || "") && !/DE/i.test(o.operation_mode || ""));
-  const hadDeballast = ops.some((o) => /DEBALLAST/i.test(o.operation_mode || ""));
-  const troAllNull  = (hadBallast    && tro.ballasting_avg   == null)
-                   || (hadDeballast  && tro.deballasting_avg == null);
+  // LOG_OVERFLOW 감지
+  const hasLogOverflow = alarms.some((a) => a.code === "LOG_OVERFLOW");
 
-  if (tripCount >= 1 || maxRepeat >= 5 || troDeballastBad) {
-    data.overall_status = "CRITICAL";
-  } else if (maxRepeat >= 3 || alarms.length >= 3 || troBallastBad || troAllNull) {
-    data.overall_status = "WARNING";
-    // TRO 전체 누락 시 ai_remarks에 경고 추가
-    if (troAllNull) {
-      const note = "TRO 측정값 없음 — 해당 월 DataReport 누락 또는 TRO 센서 미기록. 별도 확인 필요.";
-      if (data.ai_remarks && !data.ai_remarks.includes("TRO 측정값 없음"))
-        data.ai_remarks += " " + note;
-      if (data.ai_remarks_en && !data.ai_remarks_en.includes("TRO data"))
-        data.ai_remarks_en += " TRO measurement data missing — please verify DataReport or TRO sensor records.";
-    }
+  // TRO null → 실제 운전이 있었을 때만 WARNING (운전 없는 달은 제외)
+  const ops          = data.operations || [];
+  const hadBallast   = ops.some((o) => /BALLAST/i.test(o.operation_mode || "") && !/DE/i.test(o.operation_mode || ""));
+  const hadDeballast = ops.some((o) => /DEBALLAST/i.test(o.operation_mode || ""));
+  const troAllNull   = (hadBallast   && tro.ballasting_avg   == null)
+                    || (hadDeballast && tro.deballasting_avg == null);
+
+  let jsStatus;
+  if (tripCount >= 1 || maxRepeat >= 5) {
+    jsStatus = "CRITICAL";
+  } else if (
+    maxRepeat >= 3 || alarms.length >= 3 ||
+    troBallastBad || troDeballastBad || troAllNull || hasLogOverflow
+  ) {
+    jsStatus = "WARNING";
   } else {
-    data.overall_status = "NORMAL";
+    jsStatus = "NORMAL";
+  }
+
+  // AI가 NORMAL인데 JS가 상향 판정 → ai_remarks에 자동 접두 삽입 (모순 방지)
+  const statusOrder = { NORMAL: 0, WARNING: 1, CRITICAL: 2 };
+  if ((statusOrder[jsStatus] ?? 0) > (statusOrder[aiStatus] ?? 0)) {
+    const prefix    = `[시스템 자동판정: ${jsStatus}] `;
+    const prefixEn  = `[Auto-escalated to ${jsStatus}] `;
+    if (data.ai_remarks && !data.ai_remarks.startsWith("[시스템"))
+      data.ai_remarks = prefix + data.ai_remarks;
+    if (data.ai_remarks_en && !data.ai_remarks_en.startsWith("[Auto"))
+      data.ai_remarks_en = prefixEn + data.ai_remarks_en;
+  }
+
+  data.overall_status = jsStatus;
+
+  // 부수 경고 메시지 추가
+  if (troAllNull) {
+    const note   = "TRO 측정값 없음 — 해당 월 DataReport 누락 또는 TRO 센서 미기록. 별도 확인 필요.";
+    const noteEn = "TRO measurement data missing — please verify DataReport or TRO sensor records.";
+    if (data.ai_remarks && !data.ai_remarks.includes("TRO 측정값 없음"))
+      data.ai_remarks += " " + note;
+    if (data.ai_remarks_en && !data.ai_remarks_en.includes("TRO data"))
+      data.ai_remarks_en += " " + noteEn;
   }
 }
 
@@ -505,8 +539,8 @@ function checkOperationCoverage(data) {
   // 모든 운전이 단 하루에 집중된 경우
   if (uniqueDates.size === 1 && ops.length >= 2) {
     const onlyDate = [...uniqueDates][0];
-    const note = `⚠️ 운전 기록이 ${onlyDate} 1일치에만 집중 — 월 전체 데이터 누락 가능성 있음. OperationTimeReport 재확인 권장.`;
-    const noteEn = `⚠️ All operations recorded on ${onlyDate} only — possible data omission for other dates. Please re-check OperationTimeReport.`;
+    const note = `운전 기록이 ${onlyDate} 1일에 집중되어 있어 다른 날짜의 데이터 누락 여부 확인을 권장합니다.`;
+    const noteEn = `All operations recorded on ${onlyDate} only — please verify whether records for other dates may be missing.`;
     if (data.ai_remarks && !data.ai_remarks.includes("운전 기록이")) {
       data.ai_remarks += " " + note;
     }
