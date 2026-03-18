@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
 import { CONFIG, INITIAL_VESSELS } from "./config.js";
+import { readVessels, writeVessels } from "./services/sheetsService.js";
 import Dashboard from "./components/Dashboard.jsx";
 import VesselManager from "./components/VesselManager.jsx";
 
@@ -50,13 +51,18 @@ export default function App() {
     ? userEmail === CONFIG.ADMIN_EMAIL
     : !!accessToken;
 
-  const setVessels = useCallback((updater) => {
+  const setVessels = useCallback((updater, token) => {
     setVesselsRaw((prev) => {
       const next = typeof updater === "function" ? updater(prev) : updater;
       saveVessels(next);
+      // Sheets 동기화 (accessToken은 클로저보다 인자 우선)
+      const tok = token || accessToken;
+      if (tok && CONFIG.SHEETS_ID) {
+        writeVessels(CONFIG.SHEETS_ID, next, tok).catch(console.warn);
+      }
       return next;
     });
-  }, []);
+  }, [accessToken]);
 
   async function handleLogin() {
     setAuthLoading(true);
@@ -73,7 +79,7 @@ export default function App() {
             return;
           }
           const token = tokenResponse.access_token;
-          fetchUserEmail(token).then((email) => {
+          fetchUserEmail(token).then(async (email) => {
             if (!email || !email.endsWith("@ekmtc.com")) {
               window.google?.accounts?.oauth2?.revoke(token);
               setAuthError("회사 계정(@ekmtc.com)으로만 접속 가능합니다.");
@@ -82,6 +88,22 @@ export default function App() {
             }
             setAccessToken(token);
             setUserEmail(email);
+            // Sheets에서 선박 목록 로드 (SHEETS_ID가 설정된 경우)
+            if (CONFIG.SHEETS_ID) {
+              try {
+                const sheetVessels = await readVessels(CONFIG.SHEETS_ID, token);
+                if (sheetVessels.length > 0) {
+                  setVesselsRaw(sheetVessels);
+                  saveVessels(sheetVessels);
+                } else {
+                  // Sheets가 비어있으면 로컬 데이터를 Sheets에 업로드
+                  const localVessels = loadVessels() || INITIAL_VESSELS;
+                  writeVessels(CONFIG.SHEETS_ID, localVessels, token).catch(console.warn);
+                }
+              } catch (e) {
+                console.warn("Sheets 선박 로드 실패, 로컬 데이터 사용:", e.message);
+              }
+            }
             setAuthLoading(false);
           });
         },

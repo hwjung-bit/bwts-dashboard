@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import { collectMonthData } from "../services/driveService.js";
 import { analyzePdfFromDrive } from "../services/geminiService.js";
+import { readMonthlyData, upsertMonthlyEntry } from "../services/sheetsService.js";
 import { mapOverallStatus, CONFIG } from "../config.js";
 import StatusCards from "./StatusCards.jsx";
 import VesselTable from "./VesselTable.jsx";
@@ -66,6 +67,7 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
   const [monthlyData, setMonthlyData] = useState(() =>
     loadMonthlyData(String(CURRENT_YEAR), String(new Date().getMonth() + 1))
   );
+  const [sheetsLoading, setSheetsLoading] = useState(false);
   const [analyzing, setAnalyzing]     = useState(false);
   const [analyzingNames, setAnalyzingNames] = useState([]); // 현재 분석 중인 선박명
   const [analyzeError, setAnalyzeError] = useState("");
@@ -73,11 +75,19 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
   const [scanInfo, setScanInfo]        = useState(null);
   const [selectedId, setSelectedId]   = useState(null);
 
-  // 월/연도 변경 시 해당 월 데이터 로드
+  // 월/연도 변경 시 해당 월 데이터 로드 (Sheets 우선, fallback localStorage)
   useEffect(() => {
-    setMonthlyData(loadMonthlyData(year, month));
     setSelectedId(null);
-  }, [year, month]);
+    if (accessToken && CONFIG.SHEETS_ID) {
+      setSheetsLoading(true);
+      readMonthlyData(CONFIG.SHEETS_ID, year, month, accessToken)
+        .then((data) => setMonthlyData(data))
+        .catch(() => setMonthlyData(loadMonthlyData(year, month)))
+        .finally(() => setSheetsLoading(false));
+    } else {
+      setMonthlyData(loadMonthlyData(year, month));
+    }
+  }, [year, month, accessToken]);
 
   // 선박 정의 + 이번 달 분석 데이터 병합
   const displayVessels = vessels.map((v) => ({
@@ -88,14 +98,17 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
 
   const selectedVessel = displayVessels.find((v) => v.id === selectedId) || null;
 
-  // 특정 선박의 월별 데이터만 업데이트
+  // 특정 선박의 월별 데이터만 업데이트 (localStorage + Sheets 동기화)
   function updateMonthlyVessel(vesselId, updates) {
     setMonthlyData((prev) => {
-      const next = {
-        ...prev,
-        [vesselId]: { ...(prev[vesselId] || {}), ...updates },
-      };
+      const entry = { ...(prev[vesselId] || {}), ...updates };
+      const next = { ...prev, [vesselId]: entry };
       saveMonthlyData(year, month, next);
+      // Sheets upsert (비동기, 실패해도 UI에 영향 없음)
+      if (accessToken && CONFIG.SHEETS_ID) {
+        upsertMonthlyEntry(CONFIG.SHEETS_ID, vesselId, year, month, entry, accessToken)
+          .catch((e) => console.warn("Sheets upsert 실패:", e.message));
+      }
       return next;
     });
   }
@@ -382,6 +395,12 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
             {analyzingNames.length > 0 && (
               <div className="text-xs text-blue-600 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
                 🔄 분석중: {analyzingNames.join(", ")}
+              </div>
+            )}
+            {sheetsLoading && (
+              <div className="text-xs text-slate-400 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 flex items-center gap-1.5">
+                <span className="w-3 h-3 border-2 border-slate-300 border-t-slate-500 rounded-full animate-spin" />
+                Sheets 데이터 로딩중...
               </div>
             )}
             {analyzeError && (

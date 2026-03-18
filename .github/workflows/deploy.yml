@@ -38,9 +38,10 @@ jobs:
             GOOGLE_CLIENT_ID: "${{ secrets.GOOGLE_CLIENT_ID }}",
             GEMINI_API_KEY: "${{ secrets.GEMINI_API_KEY }}",
             DRIVE_ROOT_FOLDER_ID: "${{ secrets.DRIVE_ROOT_FOLDER_ID }}",
-            SCOPES: "https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/gmail.send email",
+            SCOPES: "https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/spreadsheets email",
             GEMINI_MODEL: "gemini-2.5-flash",
             ADMIN_EMAIL: "${{ secrets.ADMIN_EMAIL }}",
+            SHEETS_ID: "${{ secrets.SHEETS_ID }}",
           };
           export { INITIAL_VESSELS, STATUS_CONFIG, mapOverallStatus } from "./config.static.js";
           EOF
