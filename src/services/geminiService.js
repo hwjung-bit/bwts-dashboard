@@ -65,15 +65,52 @@ const STAGE1_RESPONSE_SCHEMA = {
     imo_number:   { type: "string", nullable: true },
     period:       { type: "string" },
     manufacturer: { type: "string" },
-    operations:   { type: "array",  items: { type: "object" } },
-    tro_data:     {
+    operations: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          date:             { type: "string",  nullable: true },
+          operation_mode:   { type: "string",  nullable: true },
+          start_time:       { type: "string",  nullable: true },
+          end_time:         { type: "string",  nullable: true },
+          ballast_volume:   { type: "number",  nullable: true },
+          deballast_volume: { type: "number",  nullable: true },
+          run_time:         { type: "number",  nullable: true },
+          location_gps:     { type: "string",  nullable: true },
+        },
+      },
+    },
+    tro_data: {
       type: "object",
       properties: {
         ballasting_avg:   { type: "number", nullable: true },
         deballasting_avg: { type: "number", nullable: true },
       },
     },
-    error_alarms: { type: "array", items: { type: "object" } },
+    error_alarms: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          code:        { type: "string", nullable: true },
+          description: { type: "string", nullable: true },
+          level:       { type: "string", nullable: true },
+          date:        { type: "string", nullable: true },
+          time:        { type: "string", nullable: true },
+          sensor_at_event: {
+            type: "object",
+            nullable: true,
+            properties: {
+              rec_voltage: { type: "number", nullable: true },
+              rec_current: { type: "number", nullable: true },
+              tro:         { type: "number", nullable: true },
+              location_gps:{ type: "string", nullable: true },
+            },
+          },
+        },
+      },
+    },
   },
   required: ["operations", "error_alarms"],
 };
@@ -521,6 +558,27 @@ function autoFillRemarks(data) {
 }
 
 
+// ── TRO 비정상값 sanity check (잘못된 단위/추출 오류 방어) ───
+function sanitizeTroValues(data) {
+  const tro = data.tro_data;
+  if (!tro) return;
+  // 100ppm 초과는 센서오류/단위오류로 간주 → null 처리 + ai_remarks 경고
+  if (tro.ballasting_avg != null && tro.ballasting_avg > 100) {
+    const val = tro.ballasting_avg;
+    tro.ballasting_avg = null;
+    const note = `주입 TRO ${val}ppm — 비정상 수치(센서 오류 또는 단위 오류 의심). 재확인 필요.`;
+    if (data.ai_remarks && !data.ai_remarks.includes("비정상 수치"))
+      data.ai_remarks += " " + note;
+  }
+  if (tro.deballasting_avg != null && tro.deballasting_avg > 100) {
+    const val = tro.deballasting_avg;
+    tro.deballasting_avg = null;
+    const note = `배출 TRO ${val}ppm — 비정상 수치(센서 오류 또는 단위 오류 의심). 재확인 필요.`;
+    if (data.ai_remarks && !data.ai_remarks.includes("비정상 수치"))
+      data.ai_remarks += " " + note;
+  }
+}
+
 // ── 응답 후처리: 필수 필드 검증 및 정규화 ───────────────────
 function validateAndNormalizeResult(data) {
   if (!data || typeof data !== "object") return {};
@@ -533,6 +591,8 @@ function validateAndNormalizeResult(data) {
   // ai_remarks / ai_remarks_en 없으면 빈 문자열
   if (!data.ai_remarks) data.ai_remarks = "";
   if (!data.ai_remarks_en) data.ai_remarks_en = "";
+  // 0. TRO 비정상값 sanity check (100ppm 초과 → null)
+  sanitizeTroValues(data);
   // 1. 알람 레벨 정규화 (Trip/Alarm/Warning 통일)
   data.error_alarms = normalizeAlarmLevels(data.error_alarms);
   // 2. 반복 알람 그룹화 (×N회)
