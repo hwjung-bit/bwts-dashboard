@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { collectMonthData } from "../services/driveService.js";
 import { analyzePdfFromDrive } from "../services/geminiService.js";
-import { readMonthlyData, upsertMonthlyEntry } from "../services/sheetsService.js";
+import { readMonthlyData, upsertMonthlyEntry, clearMonthlyData } from "../services/sheetsService.js";
 import { mapOverallStatus, CONFIG } from "../config.js";
 import StatusCards from "./StatusCards.jsx";
 import VesselTable from "./VesselTable.jsx";
@@ -380,6 +380,9 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
                     saveMonthlyData(year, month, {});
                     setScanInfo(null);
                     setAnalyzeError("");
+                    if (accessToken && CONFIG.SHEETS_ID) {
+                      clearMonthlyData(CONFIG.SHEETS_ID, year, month, accessToken).catch(console.warn);
+                    }
                   }}
                   disabled={analyzing}
                   className="px-3 py-2 text-sm bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-500 border border-slate-200 rounded-lg transition-colors font-medium"

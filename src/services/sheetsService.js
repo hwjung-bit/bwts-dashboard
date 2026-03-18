@@ -156,3 +156,41 @@ export async function upsertMonthlyEntry(sheetId, vesselId, year, month, entry, 
     });
   }
 }
+
+/**
+ * 특정 년/월의 MonthlyData 행 전체를 NO_DATA로 초기화
+ * (Sheets API는 행 삭제가 복잡하므로 내용만 비움)
+ */
+export async function clearMonthlyData(sheetId, year, month, accessToken) {
+  const range = encodeURIComponent("MonthlyData!A2:H");
+  const readRes = await fetch(`${BASE}/${sheetId}/values/${range}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!readRes.ok) return; // 실패해도 조용히 무시
+
+  const json = await readRes.json();
+  const rows = json.values || [];
+
+  // batchUpdate로 해당 년/월 행을 빈 값으로 덮어씀
+  const requests = [];
+  rows.forEach((r, i) => {
+    if (r[1] === String(year) && r[2] === String(month)) {
+      const sheetRow = i + 2;
+      requests.push({
+        range: `MonthlyData!A${sheetRow}:H${sheetRow}`,
+        values: [["", "", "", "", "", "", "", ""]],
+      });
+    }
+  });
+
+  if (requests.length === 0) return;
+
+  await fetch(
+    `${BASE}/${sheetId}/values:batchUpdate`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ valueInputOption: "RAW", data: requests }),
+    }
+  );
+}
