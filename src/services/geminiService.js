@@ -120,8 +120,8 @@ const STAGE2_RESPONSE_SCHEMA = {
   type: "object",
   properties: {
     overall_status: { type: "string", enum: ["NORMAL", "WARNING", "CRITICAL"] },
-    ai_remarks:     { type: "string" },
-    ai_remarks_en:  { type: "string" },
+    ai_remarks:     { type: "array", items: { type: "string" } },
+    ai_remarks_en:  { type: "array", items: { type: "string" } },
   },
   required: ["overall_status", "ai_remarks", "ai_remarks_en"],
 };
@@ -314,11 +314,10 @@ CRITICAL (하나라도 해당):
 - TRO 배출 기준 초과(0.1ppm 초과)가 연속 3회 이상 명백하게 발생
 
 [ai_remarks 작성 지침]
-반드시 아래 구조로 작성하고, 각 줄을 \n 로 구분하세요.
-
-1줄: [운전 현황] 주입 N회 / 배출 N회. 주입 TRO Xppm(정상 5~10ppm [충족/미달]). 배출 TRO Xppm(IMO 기준 [충족/초과]).
-2줄~: [CODE701] Trip×1+Alarm×1 — 조치. ← 알람 코드마다 [코드명] 형태로 별도 줄. VRCS_ERR, LOG_OVERFLOW도 동일. 알람 없으면 [알람없음] 이상 알람 없음.
-마지막줄: [종합] 핵심 문제 1~2문장 요약 및 권고사항.
+ai_remarks는 문자열 배열(array)로 반환하세요. 각 원소 순서:
+- 원소 0: [운전 현황] 주입 N회 / 배출 N회. 주입 TRO Xppm(정상 5~10ppm [충족/미달]). 배출 TRO Xppm(IMO 기준 [충족/초과]).
+- 원소 1~N: [CODE701] Trip×1+Alarm×1 — 조치. (알람 코드마다 별도 원소. VRCS_ERR, LOG_OVERFLOW도 동일. 알람 없으면 원소 1개: "[알람없음] 이상 알람 없음.")
+- 마지막 원소: [종합] 핵심 문제 1~2문장 요약 및 권고사항.
 
 - 반드시 구체적 숫자 포함: 운전 횟수, TRO 평균값(ppm), 주요 알람 코드 및 발생 건수
 - 배출 TRO 0.00ppm에 가까운 것은 정상 중화 결과이므로 문제 삼지 말 것
@@ -336,19 +335,12 @@ CRITICAL (하나라도 해당):
   * LOG_OVERFLOW: Event Log 100건 초과 — 전체 로그 상세 검토 권고
 
 예시:
-[운전 현황] 주입 3회 / 배출 2회. 주입 TRO 6.2ppm(정상 충족). 배출 TRO 0.02ppm(IMO 기준 충족).
-[CODE200] Alarm×3 — CLX 시약 상태 점검 권장.
-[CODE701] Trip×1+Alarm×1 — PLC 통신 케이블 연결 상태 확인 권장.
-[종합] 전반적으로 정상 운전. CLX 시약 상태 모니터링 지속 권장.
+["[운전 현황] 주입 3회 / 배출 2회. 주입 TRO 6.2ppm(정상 충족). 배출 TRO 0.02ppm(IMO 기준 충족).", "[CODE200] Alarm×3 — CLX 시약 상태 점검 권장.", "[CODE701] Trip×1+Alarm×1 — PLC 통신 케이블 연결 상태 확인 권장.", "[종합] 전반적으로 정상 운전. CLX 시약 상태 모니터링 지속 권장."]
 
 [ai_remarks_en 작성 지침]
-- ai_remarks와 동일한 3줄 구조를 영어로 작성 (본선 발송 이메일용)
-- 줄 구분은 동일하게 \n 사용
+- ai_remarks와 동일하게 문자열 배열(array)로 반환. 동일 구조를 영어로 작성 (본선 발송 이메일용)
 - Example:
-[Operations] 3 ballasting / 2 deballasting. Avg TRO 6.2ppm (within 5~10ppm range). Deballasting TRO 0.02ppm (IMO compliant).
-[CODE200] Alarm×3 — recommend checking CLX reagent and sampling line.
-[CODE701] Trip×1+Alarm×1 — check PLC communication cable connection.
-[Summary] Overall normal operation. Continue monitoring CLX reagent condition.
+["[Operations] 3 ballasting / 2 deballasting. Avg TRO 6.2ppm (within 5~10ppm range). Deballasting TRO 0.02ppm (IMO compliant).", "[CODE200] Alarm×3 — recommend checking CLX reagent and sampling line.", "[CODE701] Trip×1+Alarm×1 — check PLC communication cable connection.", "[Summary] Overall normal operation. Continue monitoring CLX reagent condition."]
 
 [주의사항]
 - 불확실한 경우 CRITICAL보다 WARNING/NORMAL 우선
@@ -514,15 +506,16 @@ function appendValveWarning(data) {
   const note = isCritical
     ? `CODE(${codes}) 밸브 비정상 동작 총 ${totalCount}회 감지 — [긴급] 해당 밸브 즉각 점검 필요 (CRITICAL 수준).`
     : `CODE(${codes}) 밸브 비정상 동작 총 ${totalCount}회 감지 — 해당 밸브 개도 설정 및 센서 점검 권장.`;
-  if (data.ai_remarks && !data.ai_remarks.includes("밸브 비정상")) {
-    data.ai_remarks += " " + note;
-  }
-  if (data.ai_remarks_en && !data.ai_remarks_en.includes("Valve abnormal")) {
-    const noteEn = isCritical
-      ? `CODE(${codes}) Valve abnormal operation detected ${totalCount} times — [URGENT] immediate valve inspection required (CRITICAL level).`
-      : `CODE(${codes}) Valve abnormal operation detected ${totalCount} times — recommend checking valve position and feedback sensor.`;
-    data.ai_remarks_en += " " + noteEn;
-  }
+  const remarksArr = Array.isArray(data.ai_remarks) ? data.ai_remarks : [];
+  if (!remarksArr.some((l) => l.includes("밸브 비정상"))) remarksArr.push(note);
+  data.ai_remarks = remarksArr;
+
+  const remarksEnArr = Array.isArray(data.ai_remarks_en) ? data.ai_remarks_en : [];
+  const noteEn = isCritical
+    ? `CODE(${codes}) Valve abnormal operation detected ${totalCount} times — [URGENT] immediate valve inspection required (CRITICAL level).`
+    : `CODE(${codes}) Valve abnormal operation detected ${totalCount} times — recommend checking valve position and feedback sensor.`;
+  if (!remarksEnArr.some((l) => l.includes("Valve abnormal"))) remarksEnArr.push(noteEn);
+  data.ai_remarks_en = remarksEnArr;
 }
 
 // ── TRO 범위 체크 → ai_remarks 보완 ──────────────────────────
@@ -539,18 +532,19 @@ function checkTroRange(data) {
   if (tro.deballasting_avg != null && tro.deballasting_avg > 0.1)
     notes.push(`배출 TRO ${tro.deballasting_avg}ppm — IMO 기준(0.1ppm) 초과, 즉시 확인 필요.`);
 
+  const remarksArr = Array.isArray(data.ai_remarks) ? data.ai_remarks : [];
+  const remarksEnArr = Array.isArray(data.ai_remarks_en) ? data.ai_remarks_en : [];
   for (const note of notes) {
-    if (data.ai_remarks && !data.ai_remarks.includes(note.slice(0, 12)))
-      data.ai_remarks += " " + note;
-    if (data.ai_remarks_en) {
-      const noteEn =
-        note.includes("미달")   ? `Ballasting TRO ${tro.ballasting_avg}ppm — below normal range (5~10ppm), check CLX reagent condition.`
-        : note.includes("초과") && note.includes("주입") ? `Ballasting TRO ${tro.ballasting_avg}ppm — exceeds normal range (5~10ppm).`
-        : `Deballasting TRO ${tro.deballasting_avg}ppm — exceeds IMO limit (0.1ppm), immediate check required.`;
-      if (!data.ai_remarks_en.includes(String(tro.ballasting_avg ?? tro.deballasting_avg)))
-        data.ai_remarks_en += " " + noteEn;
-    }
+    if (!remarksArr.some((l) => l.includes(note.slice(0, 12)))) remarksArr.push(note);
+    const noteEn =
+      note.includes("미달")   ? `Ballasting TRO ${tro.ballasting_avg}ppm — below normal range (5~10ppm), check CLX reagent condition.`
+      : note.includes("초과") && note.includes("주입") ? `Ballasting TRO ${tro.ballasting_avg}ppm — exceeds normal range (5~10ppm).`
+      : `Deballasting TRO ${tro.deballasting_avg}ppm — exceeds IMO limit (0.1ppm), immediate check required.`;
+    if (!remarksEnArr.some((l) => l.includes(String(tro.ballasting_avg ?? tro.deballasting_avg))))
+      remarksEnArr.push(noteEn);
   }
+  data.ai_remarks = remarksArr;
+  data.ai_remarks_en = remarksEnArr;
 }
 
 // ── overall_status JS 완전 재계산 ────────────────────────────
@@ -598,17 +592,18 @@ function recalcOverallStatus(data) {
 
   data.overall_status = jsStatus;
 
-  // TRO null인데 ai_remarks에 TRO 언급이 없을 때만 한 줄 추가 (50자 미만이거나 TRO 미언급)
+  // TRO null인데 ai_remarks에 TRO 언급이 없을 때만 한 줄 추가
   if (troAllNull) {
-    const remarks = data.ai_remarks || "";
-    const hasTroMention = /TRO/i.test(remarks);
-    if (!hasTroMention || remarks.length < 50) {
-      const note   = "TRO 미수신 — DataReport 확인 필요.";
-      const noteEn = "TRO data not received — please verify DataReport.";
-      if (!remarks.includes("TRO 미수신"))
-        data.ai_remarks = (remarks ? remarks + " " : "") + note;
-      if (data.ai_remarks_en && !data.ai_remarks_en.includes("TRO data not received"))
-        data.ai_remarks_en += " " + noteEn;
+    const remarksArr = Array.isArray(data.ai_remarks) ? data.ai_remarks : [];
+    const hasTroMention = remarksArr.some((l) => /TRO/i.test(l));
+    if (!hasTroMention || remarksArr.length === 0) {
+      remarksArr.push("TRO 미수신 — DataReport 확인 필요.");
+      data.ai_remarks = remarksArr;
+    }
+    const remarksEnArr = Array.isArray(data.ai_remarks_en) ? data.ai_remarks_en : [];
+    if (!remarksEnArr.some((l) => l.includes("TRO data not received"))) {
+      remarksEnArr.push("TRO data not received — please verify DataReport.");
+      data.ai_remarks_en = remarksEnArr;
     }
   }
 }
@@ -657,10 +652,12 @@ function checkZeroOperations(data) {
   if (ops.length === 0 && (tro.ballasting_avg != null || tro.deballasting_avg != null || alarms.length > 0)) {
     const note = "⚠️ 운전 기록 0건 추출됨 — OperationTimeReport 누락 또는 PDF 인식 오류 가능성. 재분석 권장.";
     const noteEn = "⚠️ 0 operations extracted — possible missing OperationTimeReport or PDF parsing error. Re-analysis recommended.";
-    if (data.ai_remarks && !data.ai_remarks.includes("운전 기록 0건"))
-      data.ai_remarks = note + " " + data.ai_remarks;
-    if (data.ai_remarks_en && !data.ai_remarks_en.includes("0 operations"))
-      data.ai_remarks_en = noteEn + " " + data.ai_remarks_en;
+    const remarksArr = Array.isArray(data.ai_remarks) ? data.ai_remarks : [];
+    if (!remarksArr.some((l) => l.includes("운전 기록 0건"))) remarksArr.unshift(note);
+    data.ai_remarks = remarksArr;
+    const remarksEnArr = Array.isArray(data.ai_remarks_en) ? data.ai_remarks_en : [];
+    if (!remarksEnArr.some((l) => l.includes("0 operations"))) remarksEnArr.unshift(noteEn);
+    data.ai_remarks_en = remarksEnArr;
     if (data.overall_status === "NORMAL") data.overall_status = "WARNING";
   }
 }

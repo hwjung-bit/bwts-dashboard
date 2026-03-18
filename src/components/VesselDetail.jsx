@@ -219,7 +219,10 @@ export default function VesselDetail({ vessel, onClose }) {
             <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
               <div className="text-xs text-blue-600 font-medium mb-2">🤖 AI 분석 요약</div>
               <div className="text-sm text-slate-700 leading-relaxed space-y-1.5">
-                {r.ai_remarks.split("\n").filter(Boolean).map((line, i) => {
+                {(Array.isArray(r.ai_remarks)
+                  ? r.ai_remarks
+                  : (r.ai_remarks || "").replace(/\\n/g, "\n").split("\n")
+                ).filter(Boolean).map((line, i) => {
                   const isOps     = line.startsWith("[운전") || line.startsWith("[Operations]");
                   const isAlarm   = /^\[CODE|^\[VRCS|^\[LOG_OVERFLOW|^\[알람없음/.test(line);
                   const isSummary = line.startsWith("[종합") || line.startsWith("[Summary]");
