@@ -221,7 +221,7 @@ export default function VesselDetail({ vessel, onClose }) {
               <div className="text-sm text-slate-700 leading-relaxed space-y-1.5">
                 {r.ai_remarks.split("\n").filter(Boolean).map((line, i) => {
                   const isOps     = line.startsWith("[운전") || line.startsWith("[Operations]");
-                  const isAlarm   = line.startsWith("[알람") || line.startsWith("[Alarm]");
+                  const isAlarm   = /^\[CODE|^\[VRCS|^\[LOG_OVERFLOW|^\[알람없음/.test(line);
                   const isSummary = line.startsWith("[종합") || line.startsWith("[Summary]");
                   if (isOps) return (
                     <p key={i} className="text-slate-700">

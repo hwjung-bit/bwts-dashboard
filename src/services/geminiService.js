@@ -317,7 +317,7 @@ CRITICAL (하나라도 해당):
 반드시 아래 구조로 작성하고, 각 줄을 \n 로 구분하세요.
 
 1줄: [운전 현황] 주입 N회 / 배출 N회. 주입 TRO Xppm(정상 5~10ppm [충족/미달]). 배출 TRO Xppm(IMO 기준 [충족/초과]).
-2줄~: [알람] 코드 1건 — 조치 1줄. ← 알람 코드마다 반드시 별도 줄로 작성. 알람 없으면 [알람] 이상 없음.
+2줄~: [CODE701] Trip×1+Alarm×1 — 조치. ← 알람 코드마다 [코드명] 형태로 별도 줄. VRCS_ERR, LOG_OVERFLOW도 동일. 알람 없으면 [알람없음] 이상 알람 없음.
 마지막줄: [종합] 핵심 문제 1~2문장 요약 및 권고사항.
 
 - 반드시 구체적 숫자 포함: 운전 횟수, TRO 평균값(ppm), 주요 알람 코드 및 발생 건수
@@ -337,8 +337,8 @@ CRITICAL (하나라도 해당):
 
 예시:
 [운전 현황] 주입 3회 / 배출 2회. 주입 TRO 6.2ppm(정상 충족). 배출 TRO 0.02ppm(IMO 기준 충족).
-[알람] CODE200×3 — CLX 시약 상태 점검 권장.
-[알람] CODE701 Trip×1 — PLC 통신 케이블 연결 상태 확인 권장.
+[CODE200] Alarm×3 — CLX 시약 상태 점검 권장.
+[CODE701] Trip×1+Alarm×1 — PLC 통신 케이블 연결 상태 확인 권장.
 [종합] 전반적으로 정상 운전. CLX 시약 상태 모니터링 지속 권장.
 
 [ai_remarks_en 작성 지침]
@@ -346,8 +346,8 @@ CRITICAL (하나라도 해당):
 - 줄 구분은 동일하게 \n 사용
 - Example:
 [Operations] 3 ballasting / 2 deballasting. Avg TRO 6.2ppm (within 5~10ppm range). Deballasting TRO 0.02ppm (IMO compliant).
-[Alarm] CODE200×3 — recommend checking CLX reagent and sampling line.
-[Alarm] CODE701 Trip×1 — check PLC communication cable connection.
+[CODE200] Alarm×3 — recommend checking CLX reagent and sampling line.
+[CODE701] Trip×1+Alarm×1 — check PLC communication cable connection.
 [Summary] Overall normal operation. Continue monitoring CLX reagent condition.
 
 [주의사항]
