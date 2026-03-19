@@ -679,37 +679,44 @@ function checkZeroOperations(data) {
 
 // ── ai_remarks 비어있을 때 기본 요약 자동 생성 ────────────────
 function autoFillRemarks(data) {
-  if (data.ai_remarks && data.ai_remarks.length > 20) return;
+  // 배열이면 원소가 1개 이상이어야 스킵, 문자열이면 20자 이상이어야 스킵
+  const hasContent = Array.isArray(data.ai_remarks)
+    ? data.ai_remarks.length > 0
+    : (data.ai_remarks && data.ai_remarks.length > 20);
+  if (hasContent) return;
 
-  const ops           = data.operations || [];
-  const ballastCount  = ops.filter((o) => (o.operation_mode || "").includes("BALLAST") && !o.operation_mode.includes("DE")).length;
+  const ops            = data.operations || [];
+  const ballastCount   = ops.filter((o) => (o.operation_mode || "").includes("BALLAST") && !o.operation_mode.includes("DE")).length;
   const deballastCount = ops.filter((o) => o.operation_mode === "DEBALLAST").length;
-  const tro           = data.tro_data || {};
-  const alarmCount    = (data.error_alarms || []).length;
+  const tro            = data.tro_data || {};
+  const alarmCount     = (data.error_alarms || []).length;
 
-  const parts = [];
-  if (ballastCount || deballastCount)
-    parts.push(`당월 주입 ${ballastCount}회/배출 ${deballastCount}회 운전.`);
-  if (tro.ballasting_avg != null)
+  const parts   = [];
+  const partsEn = [];
+
+  if (ballastCount || deballastCount) {
+    parts.push(`당월 주입 ${ballastCount}회 / 배출 ${deballastCount}회 운전.`);
+    partsEn.push(`This month: ${ballastCount} ballasting / ${deballastCount} deballasting operations.`);
+  }
+  if (tro.ballasting_avg != null) {
     parts.push(`주입 평균 TRO ${tro.ballasting_avg}ppm.`);
-  if (tro.deballasting_avg != null)
+    partsEn.push(`Avg ballasting TRO ${tro.ballasting_avg}ppm.`);
+  }
+  if (tro.deballasting_avg != null) {
     parts.push(`배출 평균 TRO ${tro.deballasting_avg}ppm.`);
-  if (alarmCount > 0)
+    partsEn.push(`Avg deballasting TRO ${tro.deballasting_avg}ppm.`);
+  }
+  if (alarmCount > 0) {
     parts.push(`알람/에러 ${alarmCount}건 발생.`);
-  else if (alarmCount === 0 && ops.length > 0)
+    partsEn.push(`Alarms/errors: ${alarmCount} occurrences.`);
+  } else if (alarmCount === 0 && ops.length > 0) {
     parts.push("알람/에러 없음.");
+    partsEn.push("No alarms/errors.");
+  }
 
   if (parts.length > 0) {
-    data.ai_remarks    = parts.join(" ");
-    data.ai_remarks_en = data.ai_remarks
-      .replace("당월 주입", "This month ballasting")
-      .replace("회/배출", "× / deballasting")
-      .replace("회 운전.", "× operations.")
-      .replace("주입 평균 TRO", "Avg ballasting TRO")
-      .replace("배출 평균 TRO", "Avg deballasting TRO")
-      .replace("ppm.", "ppm.")
-      .replace("알람/에러 없음.", "No alarms/errors.")
-      .replace(/알람\/에러 (\d+)건 발생\./, "Alarms/errors: $1 occurrences.");
+    data.ai_remarks    = parts;   // 배열로 저장
+    data.ai_remarks_en = partsEn;
   }
 }
 
@@ -723,15 +730,17 @@ function sanitizeTroValues(data) {
     const val = tro.ballasting_avg;
     tro.ballasting_avg = null;
     const note = `주입 TRO ${val}ppm — 비정상 수치(센서 오류 또는 단위 오류 의심). 재확인 필요.`;
-    if (data.ai_remarks && !data.ai_remarks.includes("비정상 수치"))
-      data.ai_remarks += " " + note;
+    const arr = Array.isArray(data.ai_remarks) ? data.ai_remarks : [];
+    if (!arr.some((l) => l.includes("비정상 수치"))) arr.push(note);
+    data.ai_remarks = arr;
   }
   if (tro.deballasting_avg != null && tro.deballasting_avg > 100) {
     const val = tro.deballasting_avg;
     tro.deballasting_avg = null;
     const note = `배출 TRO ${val}ppm — 비정상 수치(센서 오류 또는 단위 오류 의심). 재확인 필요.`;
-    if (data.ai_remarks && !data.ai_remarks.includes("비정상 수치"))
-      data.ai_remarks += " " + note;
+    const arr = Array.isArray(data.ai_remarks) ? data.ai_remarks : [];
+    if (!arr.some((l) => l.includes("비정상 수치"))) arr.push(note);
+    data.ai_remarks = arr;
   }
 }
 
@@ -765,9 +774,11 @@ function validateAndNormalizeResult(data, sections = null) {
   // 배열 보장
   if (!Array.isArray(data.error_alarms)) data.error_alarms = [];
   if (!Array.isArray(data.operations))   data.operations  = [];
-  // ai_remarks / ai_remarks_en 없으면 빈 문자열
-  if (!data.ai_remarks) data.ai_remarks = "";
-  if (!data.ai_remarks_en) data.ai_remarks_en = "";
+  // ai_remarks / ai_remarks_en — 항상 배열로 보장 (구버전 문자열도 래핑)
+  if (!Array.isArray(data.ai_remarks))
+    data.ai_remarks    = data.ai_remarks    ? [String(data.ai_remarks)]    : [];
+  if (!Array.isArray(data.ai_remarks_en))
+    data.ai_remarks_en = data.ai_remarks_en ? [String(data.ai_remarks_en)] : [];
   // 0. Event Log 페이지 과부하 감지 (TOTAL LOG 전용)
   checkEventLogPages(data, sections);
   // 1. 날짜 유효성 검사 (존재하지 않는 날짜 → null + 경고)
