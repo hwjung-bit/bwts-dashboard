@@ -115,9 +115,9 @@ export default function VesselTable({ vessels, selectedVesselId, onSelectVessel,
             <th className="text-left px-3 py-3 text-slate-500 font-medium w-24 hidden md:table-cell">연도/월</th>
             <th className="text-left px-4 py-3 text-slate-500 font-medium w-40">종합 판단</th>
             <th className="text-left px-4 py-3 text-slate-500 font-medium hidden lg:table-cell">주요 이상 항목</th>
-            <th className="text-right px-4 py-3 text-slate-500 font-medium w-20">
-              {isAdmin ? "액션" : ""}
-            </th>
+            {isAdmin && (
+              <th className="text-right px-4 py-3 text-slate-500 font-medium w-20">액션</th>
+            )}
           </tr>
         </thead>
         <tbody>
@@ -175,8 +175,8 @@ export default function VesselTable({ vessels, selectedVesselId, onSelectVessel,
                 </td>
 
                 {/* 액션 */}
-                <td className="px-4 py-3 text-right">
-                  {isAdmin ? (
+                {isAdmin && (
+                  <td className="px-4 py-3 text-right">
                     <button
                       onClick={(e) => { e.stopPropagation(); onAnalyze(v.id); }}
                       disabled={v.analysisStatus === "LOADING" || analyzingVesselId === v.id}
@@ -185,10 +185,8 @@ export default function VesselTable({ vessels, selectedVesselId, onSelectVessel,
                     >
                       {v.analysisStatus === "LOADING" ? "분석중..." : "재분석"}
                     </button>
-                  ) : (
-                    <span className="text-slate-300 text-xs">▼</span>
-                  )}
-                </td>
+                  </td>
+                )}
               </tr>
             );
           })}

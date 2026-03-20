@@ -9,15 +9,13 @@ const STATUS_COLOR = {
   NORMAL:   "#22c55e",
   WARNING:  "#eab308",
   CRITICAL: "#ef4444",
-  REVIEWED: "#6366f1",
-  RECEIVED: "#14b8a6",
+  RECEIVED: "#94a3b8",
   NO_DATA:  "#e2e8f0",
 };
 const STATUS_LABEL = {
   NORMAL:   "정상",
   WARNING:  "주의",
   CRITICAL: "이상",
-  REVIEWED: "검토완료",
   RECEIVED: "수신",
   NO_DATA:  "미수신",
 };
@@ -28,19 +26,20 @@ function loadAnnualData(year, vessels) {
     try {
       const raw = localStorage.getItem(`bwts_monthly_${year}_${m}`);
       const data = raw ? JSON.parse(raw) : null;
-      const counts = { NORMAL: 0, WARNING: 0, CRITICAL: 0, REVIEWED: 0, RECEIVED: 0, NO_DATA: 0 };
+      const counts = { NORMAL: 0, WARNING: 0, CRITICAL: 0, RECEIVED: 0, NO_DATA: 0 };
 
       if (!data || Object.keys(data).length === 0) {
         return { month: `${m}월`, analyzed: false, ...counts };
       }
       vessels.forEach((v) => {
         const s = data[v.id]?.analysisStatus || "NO_DATA";
-        if (s in counts) counts[s]++;
+        if (s === "REVIEWED") counts.RECEIVED++;       // 검토완료 → 수신으로 합산
+        else if (s in counts) counts[s]++;
         else counts.NO_DATA++;
       });
       return { month: `${m}월`, analyzed: true, ...counts };
     } catch {
-      return { month: `${m}월`, analyzed: false, NORMAL: 0, WARNING: 0, CRITICAL: 0, REVIEWED: 0, NO_DATA: 0 };
+      return { month: `${m}월`, analyzed: false, NORMAL: 0, WARNING: 0, CRITICAL: 0, RECEIVED: 0, NO_DATA: 0 };
     }
   });
 }
@@ -50,12 +49,11 @@ export default function AnnualView({ vessels }) {
   const data = loadAnnualData(year, vessels);
   const hasAnyData = data.some((d) => d.analyzed);
 
-  const totals = { NORMAL: 0, WARNING: 0, CRITICAL: 0, REVIEWED: 0, RECEIVED: 0 };
+  const totals = { NORMAL: 0, WARNING: 0, CRITICAL: 0, RECEIVED: 0 };
   data.forEach((d) => {
     totals.NORMAL   += d.NORMAL;
     totals.WARNING  += d.WARNING;
     totals.CRITICAL += d.CRITICAL;
-    totals.REVIEWED += d.REVIEWED;
     totals.RECEIVED += d.RECEIVED;
   });
   const analyzedMonths = data.filter((d) => d.analyzed).length;
@@ -78,13 +76,12 @@ export default function AnnualView({ vessels }) {
       </div>
 
       {/* 연간 요약 카드 */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
-          { key: "NORMAL",   label: "정상 건수",   color: "text-green-600",  bg: "bg-green-50 border-green-200"   },
-          { key: "WARNING",  label: "주의 건수",   color: "text-yellow-600", bg: "bg-yellow-50 border-yellow-200" },
-          { key: "CRITICAL", label: "이상 건수",   color: "text-red-600",    bg: "bg-red-50 border-red-200"       },
-          { key: "REVIEWED", label: "검토완료 건수", color: "text-indigo-600", bg: "bg-indigo-50 border-indigo-200" },
-          { key: "RECEIVED", label: "수신(미분석)", color: "text-teal-600",   bg: "bg-teal-50 border-teal-200"     },
+          { key: "NORMAL",   label: "정상 건수",    color: "text-green-600",  bg: "bg-green-50 border-green-200"   },
+          { key: "WARNING",  label: "주의 건수",    color: "text-yellow-600", bg: "bg-yellow-50 border-yellow-200" },
+          { key: "CRITICAL", label: "이상 건수",    color: "text-red-600",    bg: "bg-red-50 border-red-200"       },
+          { key: "RECEIVED", label: "수신(미분석)", color: "text-slate-500",  bg: "bg-slate-50 border-slate-200"   },
         ].map(({ key, label, color, bg }) => (
           <div key={key} className={`rounded-xl border p-4 ${bg} text-center`}>
             <div className={`text-3xl font-bold ${color}`}>{totals[key]}</div>
@@ -126,7 +123,7 @@ export default function AnnualView({ vessels }) {
                   wrapperStyle={{ fontSize: 12, color: "#64748b", paddingTop: 8 }}
                   formatter={(value) => STATUS_LABEL[value] || value}
                 />
-                {["NORMAL", "WARNING", "CRITICAL", "REVIEWED", "RECEIVED", "NO_DATA"].map((k) => (
+                {["NORMAL", "WARNING", "CRITICAL", "RECEIVED", "NO_DATA"].map((k) => (
                   <Bar key={k} dataKey={k} stackId="a" fill={STATUS_COLOR[k]} name={k} />
                 ))}
               </BarChart>
