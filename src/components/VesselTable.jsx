@@ -116,7 +116,7 @@ export default function VesselTable({ vessels, selectedVesselId, onSelectVessel,
             <th className="text-left px-4 py-3 text-slate-500 font-medium w-40">종합 판단</th>
             <th className="text-left px-4 py-3 text-slate-500 font-medium hidden lg:table-cell">주요 이상 항목</th>
             {isAdmin && (
-              <th className="text-right px-4 py-3 text-slate-500 font-medium w-20">액션</th>
+              <th className="text-right px-4 py-3 text-slate-500 font-medium w-24">액션</th>
             )}
           </tr>
         </thead>
@@ -180,7 +180,7 @@ export default function VesselTable({ vessels, selectedVesselId, onSelectVessel,
                     <button
                       onClick={(e) => { e.stopPropagation(); onAnalyze(v.id); }}
                       disabled={v.analysisStatus === "LOADING" || analyzingVesselId === v.id}
-                      className="px-3 py-1.5 text-xs rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 text-white transition-colors"
+                      className="px-3 py-1.5 text-xs rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 text-white transition-colors whitespace-nowrap"
                       title={globalAnalyzing ? "일괄 분석이 끝난 후 클릭하세요" : "재분석"}
                     >
                       {v.analysisStatus === "LOADING" ? "분석중..." : "재분석"}
