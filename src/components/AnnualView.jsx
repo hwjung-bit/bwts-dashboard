@@ -6,18 +6,16 @@ const CURRENT_YEAR = new Date().getFullYear();
 const YEARS = Array.from({ length: 5 }, (_, i) => CURRENT_YEAR - i);
 
 const STATUS_COLOR = {
-  NORMAL:   "#22c55e",
-  WARNING:  "#eab308",
   CRITICAL: "#ef4444",
-  RECEIVED: "#94a3b8",
-  NO_DATA:  "#e2e8f0",
+  WARNING:  "#eab308",
+  NORMAL:   "#22c55e",
+  RECEIVED: "#cbd5e1",  // 수신: 회색
 };
 const STATUS_LABEL = {
-  NORMAL:   "정상",
-  WARNING:  "주의",
   CRITICAL: "이상",
+  WARNING:  "주의",
+  NORMAL:   "정상",
   RECEIVED: "수신",
-  NO_DATA:  "미수신",
 };
 
 function loadAnnualData(year, vessels) {
@@ -26,16 +24,16 @@ function loadAnnualData(year, vessels) {
     try {
       const raw = localStorage.getItem(`bwts_monthly_${year}_${m}`);
       const data = raw ? JSON.parse(raw) : null;
-      const counts = { NORMAL: 0, WARNING: 0, CRITICAL: 0, RECEIVED: 0, NO_DATA: 0 };
+      const counts = { NORMAL: 0, WARNING: 0, CRITICAL: 0, RECEIVED: 0 };
 
       if (!data || Object.keys(data).length === 0) {
         return { month: `${m}월`, analyzed: false, ...counts };
       }
       vessels.forEach((v) => {
         const s = data[v.id]?.analysisStatus || "NO_DATA";
-        if (s === "REVIEWED") counts.RECEIVED++;       // 검토완료 → 수신으로 합산
+        if (s === "REVIEWED") counts.NORMAL++;   // 검토완료 → 정상으로 합산
         else if (s in counts) counts[s]++;
-        else counts.NO_DATA++;
+        // NO_DATA는 차트에 표시 안 함
       });
       return { month: `${m}월`, analyzed: true, ...counts };
     } catch {
@@ -51,10 +49,10 @@ export default function AnnualView({ vessels }) {
 
   const totals = { NORMAL: 0, WARNING: 0, CRITICAL: 0, RECEIVED: 0 };
   data.forEach((d) => {
-    totals.NORMAL   += d.NORMAL;
-    totals.WARNING  += d.WARNING;
-    totals.CRITICAL += d.CRITICAL;
-    totals.RECEIVED += d.RECEIVED;
+    totals.NORMAL   += d.NORMAL   || 0;
+    totals.WARNING  += d.WARNING  || 0;
+    totals.CRITICAL += d.CRITICAL || 0;
+    totals.RECEIVED += d.RECEIVED || 0;
   });
   const analyzedMonths = data.filter((d) => d.analyzed).length;
 
@@ -78,10 +76,10 @@ export default function AnnualView({ vessels }) {
       {/* 연간 요약 카드 */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
-          { key: "NORMAL",   label: "정상 건수",    color: "text-green-600",  bg: "bg-green-50 border-green-200"   },
-          { key: "WARNING",  label: "주의 건수",    color: "text-yellow-600", bg: "bg-yellow-50 border-yellow-200" },
-          { key: "CRITICAL", label: "이상 건수",    color: "text-red-600",    bg: "bg-red-50 border-red-200"       },
-          { key: "RECEIVED", label: "수신(미분석)", color: "text-slate-500",  bg: "bg-slate-50 border-slate-200"   },
+          { key: "NORMAL",   label: "정상 건수",   color: "text-green-600",  bg: "bg-green-50 border-green-200"   },
+          { key: "WARNING",  label: "주의 건수",   color: "text-yellow-600", bg: "bg-yellow-50 border-yellow-200" },
+          { key: "CRITICAL", label: "이상 건수",   color: "text-red-600",    bg: "bg-red-50 border-red-200"       },
+          { key: "RECEIVED", label: "수신(미분석)", color: "text-slate-500", bg: "bg-slate-50 border-slate-200"   },
         ].map(({ key, label, color, bg }) => (
           <div key={key} className={`rounded-xl border p-4 ${bg} text-center`}>
             <div className={`text-3xl font-bold ${color}`}>{totals[key]}</div>
@@ -123,18 +121,15 @@ export default function AnnualView({ vessels }) {
                   wrapperStyle={{ fontSize: 12, color: "#64748b", paddingTop: 8 }}
                   formatter={(value) => STATUS_LABEL[value] || value}
                 />
-                {["NORMAL", "WARNING", "CRITICAL", "RECEIVED", "NO_DATA"].map((k) => (
+                {["RECEIVED", "NORMAL", "WARNING", "CRITICAL"].map((k) => (
                   <Bar key={k} dataKey={k} stackId="a" fill={STATUS_COLOR[k]} name={k} />
                 ))}
               </BarChart>
             </ResponsiveContainer>
 
-            {/* 미분석 월 표시 */}
-            {data.some((d) => !d.analyzed) && (
-              <p className="text-xs text-slate-400 mt-2 text-center">
-                ⚪ 회색으로 표시된 달은 아직 분석 데이터가 없습니다.
-              </p>
-            )}
+            <p className="text-xs text-slate-400 mt-2 text-center">
+              분석이 완료된 월만 정상·주의·이상 건수가 집계됩니다.
+            </p>
           </>
         )}
       </div>

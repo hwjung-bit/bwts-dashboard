@@ -82,7 +82,16 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
     if (accessToken && CONFIG.SHEETS_ID) {
       setSheetsLoading(true);
       readMonthlyData(CONFIG.SHEETS_ID, year, month, accessToken)
-        .then((data) => setMonthlyData(data))
+        .then((sheetsData) => {
+          if (Object.keys(sheetsData).length > 0) {
+            // Sheets에 데이터 있으면 Sheets 우선 + localStorage 동기화
+            setMonthlyData(sheetsData);
+            saveMonthlyData(year, month, sheetsData);
+          } else {
+            // Sheets가 비어있으면 localStorage 우선 (저장 실패 대비)
+            setMonthlyData(loadMonthlyData(year, month));
+          }
+        })
         .catch(() => setMonthlyData(loadMonthlyData(year, month)))
         .finally(() => setSheetsLoading(false));
     } else {
