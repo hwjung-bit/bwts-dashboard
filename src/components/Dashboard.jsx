@@ -499,6 +499,8 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
             isAdmin={isAdmin}
             globalAnalyzing={analyzing}
             analyzingVesselId={analyzingVesselId}
+            year={year}
+            month={month}
           />
 
           {/* ── 선택된 선박 상세 + 검토 패널 ── */}
