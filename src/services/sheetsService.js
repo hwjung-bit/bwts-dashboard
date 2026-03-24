@@ -120,7 +120,29 @@ export async function upsertMonthlyEntry(sheetId, vesselId, year, month, entry, 
   const json = await readRes.json();
   const rows = json.values || [];
 
-  const resultJson = entry.analysisResult != null ? JSON.stringify(entry.analysisResult) : "";
+  // Sheets 셀 50,000자 제한 — 초과 시 핵심 필드만 slim 저장
+  const SHEETS_CELL_LIMIT = 48000;
+  let resultJson = "";
+  if (entry.analysisResult != null) {
+    const full = JSON.stringify(entry.analysisResult);
+    if (full.length <= SHEETS_CELL_LIMIT) {
+      resultJson = full;
+    } else {
+      const r = entry.analysisResult;
+      const slim = {
+        overall_status: r.overall_status,
+        ai_remarks:     r.ai_remarks,
+        ai_remarks_en:  r.ai_remarks_en,
+        error_alarms:   r.error_alarms,
+        tro_avg:        r.tro_avg,
+        tro_null_ratio: r.tro_null_ratio,
+        op_count:       r.op_count,
+        op_hours:       r.op_hours,
+        _truncated:     true,
+      };
+      resultJson = JSON.stringify(slim);
+    }
+  }
   const newRow = [
     vesselId,
     String(year),

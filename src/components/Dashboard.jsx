@@ -68,6 +68,7 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
     loadMonthlyData(String(CURRENT_YEAR), String(new Date().getMonth() + 1))
   );
   const [sheetsLoading, setSheetsLoading] = useState(false);
+  const [sheetsError, setSheetsError]     = useState("");
   const [analyzing, setAnalyzing]     = useState(false);
   const [analyzingNames, setAnalyzingNames] = useState([]); // 현재 분석 중인 선박명
   const [analyzeError, setAnalyzeError] = useState("");
@@ -83,14 +84,17 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
       setSheetsLoading(true);
       readMonthlyData(CONFIG.SHEETS_ID, year, month, accessToken)
         .then((sheetsData) => {
-          if (Object.keys(sheetsData).length > 0) {
-            // Sheets에 데이터 있으면 Sheets 우선 + localStorage 동기화
-            setMonthlyData(sheetsData);
-            saveMonthlyData(year, month, sheetsData);
-          } else {
-            // Sheets가 비어있으면 localStorage 우선 (저장 실패 대비)
-            setMonthlyData(loadMonthlyData(year, month));
+          const localData = loadMonthlyData(year, month);
+          // 선박 단위 병합: lastAnalyzed 기준으로 더 최신 데이터 유지
+          const merged = { ...localData };
+          for (const [id, sheetsEntry] of Object.entries(sheetsData)) {
+            const local = localData[id];
+            if (!local || (sheetsEntry.lastAnalyzed || "") >= (local.lastAnalyzed || "")) {
+              merged[id] = sheetsEntry;
+            }
           }
+          setMonthlyData(merged);
+          saveMonthlyData(year, month, merged);
         })
         .catch(() => setMonthlyData(loadMonthlyData(year, month)))
         .finally(() => setSheetsLoading(false));
@@ -114,10 +118,13 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
       const entry = { ...(prev[vesselId] || {}), ...updates };
       const next = { ...prev, [vesselId]: entry };
       saveMonthlyData(year, month, next);
-      // Sheets upsert (비동기, 실패해도 UI에 영향 없음)
+      // Sheets upsert (비동기)
       if (accessToken && CONFIG.SHEETS_ID) {
         upsertMonthlyEntry(CONFIG.SHEETS_ID, vesselId, year, month, entry, accessToken)
-          .catch((e) => console.warn("Sheets upsert 실패:", e.message));
+          .catch((e) => {
+            console.warn("Sheets upsert 실패:", e.message);
+            setSheetsError("Sheets 저장 실패 — 새로고침 시 데이터가 유실될 수 있습니다.");
+          });
       }
       return next;
     });
@@ -419,6 +426,12 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
             {analyzeError && (
               <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
                 {analyzeError}
+              </div>
+            )}
+            {sheetsError && (
+              <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 flex items-center justify-between gap-2">
+                ⚠ {sheetsError}
+                <button onClick={() => setSheetsError("")} className="text-amber-400 hover:text-amber-600 font-bold leading-none">×</button>
               </div>
             )}
             {/* 마지막 분석 시각 표시 */}
