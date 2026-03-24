@@ -1,6 +1,5 @@
-// VesselTable - 선박 목록 테이블
+// VesselTable - 선박 목록 테이블 (Stitch 디자인 적용)
 
-// 운영 이슈 기반 카테고리
 const ISSUE_CATEGORIES = [
   { key: "처리수량",   match: (a) => /FMU|Flow|Volume|유량/i.test((a.code||"")+(a.description||"")) },
   { key: "배출기준",   match: (a) => /Deballass|배출|CODE201/i.test((a.code||"")+(a.description||"")) },
@@ -11,7 +10,6 @@ const ISSUE_CATEGORIES = [
   { key: "알람",       match: (a) => a.level === "Alarm" || a.level === "Warning" },
 ];
 
-// 카테고리 배지 목록 생성 (건수 포함, 제한 없음)
 function makeIssueBadges(vessel) {
   const r = vessel.analysisResult;
   if (!r) return null;
@@ -23,7 +21,6 @@ function makeIssueBadges(vessel) {
     const matched = alarms.filter(cat.match);
     if (matched.length === 0) continue;
     const hasTrip = matched.some((a) => (a.level || "").toLowerCase() === "trip");
-    // ×N회 표기에서 실제 건수 합산
     const count = matched.reduce((sum, a) => {
       const m = (a.description || "").match(/×(\d+)회/);
       return sum + (m ? parseInt(m[1]) : 1);
@@ -33,13 +30,11 @@ function makeIssueBadges(vessel) {
   return result;
 }
 
-// 종합 판단 아래 요약 한 줄 (Trip/알람 건수)
 function makeStatusSummary(vessel) {
   const r = vessel.analysisResult;
   if (!r) return null;
   const alarms = r.error_alarms || [];
   if (alarms.length === 0) return null;
-
   const tripCount  = alarms.filter((a) => (a.level||"").toLowerCase() === "trip").length;
   const alarmCount = alarms.filter((a) => (a.level||"").toLowerCase() !== "trip").length;
   const parts = [];
@@ -51,13 +46,18 @@ function makeStatusSummary(vessel) {
 function IssueSummary({ vessel }) {
   const badges = makeIssueBadges(vessel);
   if (badges === null) return <span className="text-slate-300 text-xs">-</span>;
-  if (badges.length === 0) return <span className="text-green-600 text-xs font-medium">이상 없음</span>;
+  if (badges.length === 0) return (
+    <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600">
+      <span className="material-symbols-outlined" style={{ fontSize: 14, fontVariationSettings: "'FILL' 1" }}>check_circle</span>
+      이상 없음
+    </span>
+  );
   return (
     <div className="flex flex-wrap gap-1">
       {badges.map((b) => (
         <span
           key={b.key}
-          className={`text-xs font-medium px-2 py-0.5 rounded-md border ${
+          className={`text-xs font-semibold px-2 py-0.5 rounded-md border ${
             b.hasTrip
               ? "text-red-600 bg-red-50 border-red-200"
               : "text-amber-600 bg-amber-50 border-amber-200"
@@ -70,32 +70,77 @@ function IssueSummary({ vessel }) {
   );
 }
 
-const STATUS_BADGE = {
-  CRITICAL: { label: "즉시확인필요", dot: "bg-red-500",    cls: "bg-red-50 text-red-700 border-red-200"         },
-  WARNING:  { label: "검토필요",     dot: "bg-amber-400",  cls: "bg-amber-50 text-amber-700 border-amber-200"   },
-  NORMAL:   { label: "이상없음",     dot: "bg-green-500",  cls: "bg-green-50 text-green-700 border-green-200"   },
-  REVIEWED: { label: "검토완료",     dot: "bg-indigo-500", cls: "bg-indigo-50 text-indigo-700 border-indigo-200"},
-  RECEIVED: { label: "수신",         dot: "bg-teal-500",   cls: "bg-teal-50 text-teal-700 border-teal-200"      },
-  NO_DATA:  { label: "미수신",       dot: "bg-slate-400",  cls: "bg-slate-50 text-slate-500 border-slate-200"   },
-  LOADING:  { label: "분석중",       dot: "bg-blue-500",   cls: "bg-blue-50 text-blue-700 border-blue-200"      },
+const STATUS_CONFIG = {
+  CRITICAL: {
+    label: "즉시확인필요",
+    dot: "bg-red-500",
+    cls: "bg-red-50 text-red-700 border-red-200",
+    rowHover: "hover:bg-red-50/60",
+    rowBorder: "border-l-red-400",
+  },
+  WARNING: {
+    label: "검토필요",
+    dot: "bg-amber-400",
+    cls: "bg-amber-50 text-amber-700 border-amber-200",
+    rowHover: "hover:bg-amber-50/60",
+    rowBorder: "border-l-amber-400",
+  },
+  NORMAL: {
+    label: "이상없음",
+    dot: "bg-emerald-500",
+    cls: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    rowHover: "hover:bg-slate-50",
+    rowBorder: "",
+  },
+  REVIEWED: {
+    label: "검토완료",
+    dot: "bg-indigo-500",
+    cls: "bg-indigo-50 text-indigo-700 border-indigo-200",
+    rowHover: "hover:bg-slate-50",
+    rowBorder: "",
+  },
+  RECEIVED: {
+    label: "수신",
+    dot: "bg-sky-500",
+    cls: "bg-sky-50 text-sky-700 border-sky-200",
+    rowHover: "hover:bg-sky-50/40",
+    rowBorder: "",
+  },
+  NO_DATA: {
+    label: "미수신",
+    dot: "bg-slate-300",
+    cls: "bg-slate-50 text-slate-500 border-slate-200",
+    rowHover: "hover:bg-slate-50",
+    rowBorder: "",
+  },
+  LOADING: {
+    label: "분석중",
+    dot: "bg-blue-500 animate-pulse",
+    cls: "bg-blue-50 text-blue-700 border-blue-200",
+    rowHover: "hover:bg-blue-50/40",
+    rowBorder: "",
+  },
 };
 
 function StatusBadge({ status, summary }) {
-  const s = STATUS_BADGE[status] || STATUS_BADGE.NO_DATA;
+  const s = STATUS_CONFIG[status] || STATUS_CONFIG.NO_DATA;
   return (
     <div className="flex flex-col gap-1">
-      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border w-fit ${s.cls}`}>
-        <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
+      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border w-fit ${s.cls}`}>
+        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${s.dot}`} />
         {s.label}
       </span>
       {summary && (
-        <span className="text-xs text-slate-400 pl-1">{summary}</span>
+        <span className="text-[11px] text-slate-400 pl-1">{summary}</span>
       )}
     </div>
   );
 }
 
-export default function VesselTable({ vessels, selectedVesselId, onSelectVessel, onAnalyze, isAdmin, globalAnalyzing, analyzingVesselId, year, month }) {
+export default function VesselTable({
+  vessels, selectedVesselId, onSelectVessel, onAnalyze,
+  isAdmin, globalAnalyzing, analyzingVesselId, year, month
+}) {
   if (vessels.length === 0) {
     return (
       <div className="text-center py-12 text-slate-400 bg-white border border-slate-200 rounded-xl">
@@ -107,91 +152,113 @@ export default function VesselTable({ vessels, selectedVesselId, onSelectVessel,
   const yearMonth = year && month ? `${year}-${String(month).padStart(2, "0")}` : "-";
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-slate-100 bg-slate-50">
-            <th className="text-left px-3 py-3 text-slate-500 font-medium w-36">선박 코드</th>
-            <th className="text-left px-3 py-3 text-slate-500 font-medium w-24 hidden md:table-cell">연도/월</th>
-            <th className="text-left px-4 py-3 text-slate-500 font-medium w-40">종합 판단</th>
-            <th className="text-left px-4 py-3 text-slate-500 font-medium hidden lg:table-cell">주요 이상 항목</th>
-            {isAdmin && (
-              <th className="text-right px-4 py-3 text-slate-500 font-medium w-24">액션</th>
-            )}
-          </tr>
-        </thead>
-        <tbody>
-          {vessels.map((v, idx) => {
-            const isSelected  = v.id === selectedVesselId;
-            const summary     = makeStatusSummary(v);
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      {/* 테이블 헤더 영역 */}
+      <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+        <h3 className="font-bold text-slate-800 text-sm" style={{ fontFamily: "'Manrope', sans-serif" }}>
+          Vessel Monitoring List
+        </h3>
+        <span className="text-xs text-slate-400">{yearMonth} · {vessels.length}척</span>
+      </div>
 
-            return (
-              <tr
-                key={v.id}
-                onClick={() => onSelectVessel(v.id)}
-                className={`border-b border-slate-50 cursor-pointer transition-colors hover:bg-slate-50 ${
-                  isSelected ? "bg-blue-50 border-l-2 border-l-blue-400" : ""
-                }`}
-              >
-                {/* 선박 코드 */}
-                <td className="px-3 py-3">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-slate-400 text-xs font-mono w-5 shrink-0">
-                      {String(idx + 1).padStart(2, "0")}
-                    </span>
-                    <span className="font-mono font-semibold text-slate-800 text-sm">
-                      {v.vesselCode || v.name}
-                    </span>
-                    <span className="text-xs px-1 py-0.5 rounded bg-slate-100 text-slate-400 border border-slate-200 hidden sm:inline leading-none">
-                      이력
-                    </span>
-                  </div>
-                </td>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr className="bg-slate-50/80 border-b border-slate-100">
+              <th className="text-left px-6 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider w-10">#</th>
+              <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">선박 코드</th>
+              <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider w-36">종합 판단</th>
+              <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider hidden lg:table-cell">주요 이상 항목</th>
+              {isAdmin && (
+                <th className="text-right px-6 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider w-28">액션</th>
+              )}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-50">
+            {vessels.map((v, idx) => {
+              const isSelected = v.id === selectedVesselId;
+              const summary    = makeStatusSummary(v);
+              const sc         = STATUS_CONFIG[v.analysisStatus] || STATUS_CONFIG.NO_DATA;
+              const isCritical = v.analysisStatus === "CRITICAL";
 
-                {/* 연도/월 */}
-                <td className="px-3 py-3 text-slate-400 text-xs font-mono hidden md:table-cell">
-                  {yearMonth}
-                </td>
-
-                {/* 종합 판단 */}
-                <td className="px-4 py-3">
-                  <StatusBadge status={v.analysisStatus || "NO_DATA"} summary={summary} />
-                </td>
-
-                {/* 주요 이상 항목 */}
-                <td className="px-4 py-3 hidden lg:table-cell">
-                  {v.analysisError ? (
-                    <details className="inline-block max-w-sm" onClick={(e) => e.stopPropagation()}>
-                      <summary className="text-red-500 text-xs font-medium cursor-pointer list-none hover:text-red-700 select-none">
-                        ⚠️ 오류
-                      </summary>
-                      <div className="mt-1.5 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 leading-relaxed break-all whitespace-pre-wrap">
-                        {v.analysisError}
-                      </div>
-                    </details>
-                  ) : (
-                    <IssueSummary vessel={v} />
-                  )}
-                </td>
-
-                {/* 액션 */}
-                {isAdmin && (
-                  <td className="px-4 py-3 text-right">
-                    <button
-                      onClick={(e) => { e.stopPropagation(); onAnalyze(v.id); }}
-                      disabled={v.analysisStatus === "LOADING" || analyzingVesselId === v.id}
-                      className="px-3 py-1.5 text-xs rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 text-white transition-colors whitespace-nowrap"
-                      title={globalAnalyzing ? "일괄 분석이 끝난 후 클릭하세요" : "재분석"}
-                    >
-                      {v.analysisStatus === "LOADING" ? "분석중..." : "재분석"}
-                    </button>
+              return (
+                <tr
+                  key={v.id}
+                  onClick={() => onSelectVessel(v.id)}
+                  className={`cursor-pointer transition-colors ${sc.rowHover} ${
+                    isSelected
+                      ? "bg-blue-50 border-l-2 border-l-blue-500"
+                      : isCritical
+                      ? "border-l-2 border-l-red-400"
+                      : ""
+                  }`}
+                >
+                  {/* 번호 */}
+                  <td className="px-6 py-4">
+                    <span className="text-xs font-mono text-slate-300">{String(idx + 1).padStart(2, "0")}</span>
                   </td>
-                )}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+
+                  {/* 선박 코드 */}
+                  <td className="px-4 py-4">
+                    <div className="flex flex-col">
+                      <span className="font-bold text-slate-800">{v.vesselCode || v.name}</span>
+                      {v.imoNumber && (
+                        <span className="text-[11px] text-slate-400">IMO {v.imoNumber}</span>
+                      )}
+                    </div>
+                  </td>
+
+                  {/* 종합 판단 */}
+                  <td className="px-4 py-4">
+                    <StatusBadge status={v.analysisStatus || "NO_DATA"} summary={summary} />
+                  </td>
+
+                  {/* 주요 이상 항목 */}
+                  <td className="px-4 py-4 hidden lg:table-cell">
+                    {v.analysisError ? (
+                      <details className="inline-block max-w-sm" onClick={(e) => e.stopPropagation()}>
+                        <summary className="text-red-500 text-xs font-medium cursor-pointer list-none hover:text-red-700 select-none">
+                          ⚠️ 오류 (클릭하여 확인)
+                        </summary>
+                        <div className="mt-1.5 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 leading-relaxed break-all whitespace-pre-wrap">
+                          {v.analysisError}
+                        </div>
+                      </details>
+                    ) : (
+                      <IssueSummary vessel={v} />
+                    )}
+                  </td>
+
+                  {/* 액션 */}
+                  {isAdmin && (
+                    <td className="px-6 py-4 text-right">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onAnalyze(v.id); }}
+                        disabled={v.analysisStatus === "LOADING" || analyzingVesselId === v.id}
+                        className={`px-4 py-2 text-xs rounded-lg font-semibold whitespace-nowrap transition-colors ${
+                          v.analysisStatus === "LOADING" || analyzingVesselId === v.id
+                            ? "bg-slate-100 text-slate-400 cursor-not-allowed"
+                            : isCritical
+                            ? "bg-red-600 hover:bg-red-700 text-white"
+                            : "bg-[#003c69] hover:bg-[#004d8a] text-white"
+                        }`}
+                        title={globalAnalyzing ? "일괄 분석이 끝난 후 클릭하세요" : "재분석"}
+                      >
+                        {v.analysisStatus === "LOADING" || analyzingVesselId === v.id ? (
+                          <span className="flex items-center gap-1.5">
+                            <span className="w-3 h-3 border-2 border-slate-300 border-t-slate-500 rounded-full animate-spin" />
+                            분석중
+                          </span>
+                        ) : "재분석"}
+                      </button>
+                    </td>
+                  )}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

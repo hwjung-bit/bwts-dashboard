@@ -1,9 +1,61 @@
-// StatusCards - 전체 현황 카드
+// StatusCards - 현황 카드 (Stitch 디자인 적용)
 const CARD_DEFS = [
-  { key: "NORMAL",   icon: "🟢", label: "정상",   bg: "bg-green-50",  border: "border-green-200",  num: "text-green-600",  sub: "text-green-500"  },
-  { key: "WARNING",  icon: "🟡", label: "주의",   bg: "bg-yellow-50", border: "border-yellow-200", num: "text-yellow-600", sub: "text-yellow-500" },
-  { key: "CRITICAL", icon: "🔴", label: "이상",   bg: "bg-red-50",    border: "border-red-200",    num: "text-red-600",    sub: "text-red-500"    },
-  { key: "RECEIVED", icon: "📥", label: "수신(미분석)", bg: "bg-slate-50", border: "border-slate-200", num: "text-slate-600", sub: "text-slate-400" },
+  {
+    key: "CRITICAL",
+    label: "즉시확인필요",
+    icon: "emergency_home",
+    emphasized: true,
+    numCls: "text-slate-800",
+    iconBg: "bg-red-100 text-red-600",
+    bar: "bg-red-500",
+    barBg: "bg-red-100",
+    border: "border-red-200",
+    desc: "즉각적인 조치 필요",
+  },
+  {
+    key: "WARNING",
+    label: "검토필요",
+    icon: "warning",
+    numCls: "text-slate-800",
+    iconBg: "bg-amber-100 text-amber-600",
+    bar: "bg-amber-400",
+    barBg: "bg-amber-100",
+    border: "border-slate-200",
+    desc: "주의 수치 감지",
+  },
+  {
+    key: "NORMAL",
+    label: "이상없음",
+    icon: "check_circle",
+    numCls: "text-slate-800",
+    iconBg: "bg-emerald-100 text-emerald-600",
+    bar: "bg-emerald-500",
+    barBg: "bg-emerald-100",
+    border: "border-slate-200",
+    desc: "정상 범위 운항 중",
+  },
+  {
+    key: "REVIEWED",
+    label: "검토완료",
+    icon: "task_alt",
+    numCls: "text-slate-800",
+    iconBg: "bg-indigo-100 text-indigo-600",
+    bar: "bg-indigo-400",
+    barBg: "bg-indigo-100",
+    border: "border-slate-200",
+    desc: "담당자 확인 완료",
+  },
+  {
+    key: "RECEIVED",
+    label: "수신(미분석)",
+    icon: "inbox",
+    numCls: "text-slate-800",
+    iconBg: "bg-sky-100 text-sky-600",
+    bar: "bg-sky-400",
+    barBg: "bg-sky-100",
+    border: "border-slate-200",
+    desc: "분석 대기 중",
+  },
 ];
 
 export default function StatusCards({ vessels }) {
@@ -13,18 +65,53 @@ export default function StatusCards({ vessels }) {
     if (s in counts) counts[s]++;
     else counts.NO_DATA++;
   });
-  // 검토완료 → 정상으로 합산
-  counts.NORMAL += counts.REVIEWED;
+
+  const total = vessels.length || 1;
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-      {CARD_DEFS.map(({ key, icon, label, bg, border, num, sub }) => (
-        <div key={key} className={`rounded-xl border p-4 ${bg} ${border} flex flex-col items-center gap-1.5`}>
-          <span className="text-xl">{icon}</span>
-          <span className={`text-3xl font-bold ${num}`}>{counts[key]}</span>
-          <span className={`text-xs font-medium ${sub}`}>{label}</span>
-        </div>
-      ))}
+    <div className="grid grid-cols-5 gap-4 mb-6">
+      {CARD_DEFS.map(({ key, label, icon, emphasized, numCls, iconBg, bar, barBg, border, desc }) => {
+        const count = counts[key];
+        const pct = Math.round((count / total) * 100);
+
+        return (
+          <div
+            key={key}
+            className={`bg-white rounded-xl p-5 border ${emphasized ? "border-2 border-red-200" : border} shadow-sm relative overflow-hidden`}
+          >
+            {/* 아이콘 (우상단) */}
+            <div className={`absolute top-0 right-0 p-2.5 rounded-bl-xl ${iconBg}`}>
+              <span className="material-symbols-outlined" style={{ fontSize: 20, fontVariationSettings: "'FILL' 1" }}>
+                {icon}
+              </span>
+            </div>
+
+            <p className={`text-xs font-bold mb-1 ${
+              key === "CRITICAL" ? "text-red-600"
+              : key === "WARNING" ? "text-amber-600"
+              : key === "NORMAL" ? "text-emerald-600"
+              : key === "REVIEWED" ? "text-indigo-600"
+              : "text-sky-600"
+            }`}>
+              {label}
+            </p>
+
+            <h4 className={`text-4xl font-extrabold mb-4 ${numCls}`} style={{ fontFamily: "'Manrope', sans-serif" }}>
+              {String(count).padStart(2, "0")}
+            </h4>
+
+            {/* 진행 바 */}
+            <div className={`w-full h-1.5 ${barBg} rounded-full overflow-hidden`}>
+              <div
+                className={`h-full ${bar} rounded-full transition-all`}
+                style={{ width: `${Math.max(pct, count > 0 ? 8 : 0)}%` }}
+              />
+            </div>
+
+            <p className="mt-2.5 text-[11px] text-slate-400 leading-tight">{desc}</p>
+          </div>
+        );
+      })}
     </div>
   );
 }

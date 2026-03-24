@@ -4,17 +4,13 @@ import { readVessels, writeVessels } from "./services/sheetsService.js";
 import Dashboard from "./components/Dashboard.jsx";
 import VesselManager from "./components/VesselManager.jsx";
 
-// Google Tokeninfo로 로그인 계정 이메일 조회
 async function fetchUserEmail(accessToken) {
-  const res = await fetch(
-    `https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${accessToken}`
-  );
+  const res = await fetch(`https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${accessToken}`);
   if (!res.ok) return null;
   const data = await res.json();
   return data.email || null;
 }
 
-// ── Google Identity Services (GIS) 로드 ─────────────────────
 function loadGsi() {
   return new Promise((resolve) => {
     if (window.google?.accounts?.oauth2) { resolve(); return; }
@@ -25,19 +21,12 @@ function loadGsi() {
   });
 }
 
-// ── 로컬 스토리지: 선박 데이터 영속화 ──────────────────────
 const LS_KEY = "bwts_vessels";
-
 function loadVessels() {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch { return null; }
+  try { const raw = localStorage.getItem(LS_KEY); return raw ? JSON.parse(raw) : null; }
+  catch { return null; }
 }
-
-function saveVessels(vessels) {
-  localStorage.setItem(LS_KEY, JSON.stringify(vessels));
-}
+function saveVessels(vessels) { localStorage.setItem(LS_KEY, JSON.stringify(vessels)); }
 
 export default function App() {
   const [vessels, setVesselsRaw]      = useState(() => loadVessels() || INITIAL_VESSELS);
@@ -57,7 +46,6 @@ export default function App() {
     setVesselsRaw((prev) => {
       const next = typeof updater === "function" ? updater(prev) : updater;
       saveVessels(next);
-      // Sheets 동기화 (accessToken은 클로저보다 인자 우선)
       const tok = token || accessToken;
       if (tok && CONFIG.SHEETS_ID) {
         writeVessels(CONFIG.SHEETS_ID, next, tok).catch(console.warn);
@@ -66,7 +54,6 @@ export default function App() {
     });
   }, [accessToken]);
 
-  // 로그인 성공 후 공통 처리
   async function onLoginSuccess(token, email) {
     localStorage.setItem("bwts_user_email", email);
     setAccessToken(token);
@@ -90,7 +77,6 @@ export default function App() {
     setAuthLoading(false);
   }
 
-  // GIS 토큰 클라이언트 초기화 (prompt 제어용)
   async function requestToken(silent = false) {
     await loadGsi();
     return new Promise((resolve, reject) => {
@@ -108,7 +94,6 @@ export default function App() {
     });
   }
 
-  // 페이지 로드 시 자동 재로그인 (이전에 로그인한 적 있는 경우)
   useEffect(() => {
     const savedEmail = localStorage.getItem("bwts_user_email");
     if (!savedEmail) { setAutoLoginDone(true); return; }
@@ -119,10 +104,7 @@ export default function App() {
         localStorage.removeItem("bwts_user_email");
         setAuthLoading(false);
       }))
-      .catch(() => {
-        // 자동 로그인 실패 시 로그인 화면 표시 (에러 노출 없이)
-        setAuthLoading(false);
-      })
+      .catch(() => setAuthLoading(false))
       .finally(() => setAutoLoginDone(true));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -164,137 +146,173 @@ export default function App() {
     CONFIG.GEMINI_API_KEY !== "YOUR_GEMINI_API_KEY_HERE" &&
     CONFIG.DRIVE_ROOT_FOLDER_ID !== "YOUR_DRIVE_ROOT_FOLDER_ID_HERE";
 
+  const initials = userEmail ? userEmail[0].toUpperCase() : "?";
+
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800">
-      {/* ── 헤더 ── */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <span className="text-xl">🚢</span>
-            <span className="font-bold text-slate-800 text-base">BWTS LOG ANALYZER</span>
-            <span className="text-xs text-slate-400 hidden sm:inline">자동 분석 대시보드</span>
+    <div className="flex min-h-screen bg-[#f7f9fb] text-[#191c1e]" style={{ fontFamily: "'Inter', sans-serif" }}>
+
+      {/* ── 사이드바 ── */}
+      <aside className="fixed left-0 top-0 h-full w-64 bg-[#f2f4f6] border-r border-slate-200 z-50 flex flex-col">
+        {/* 로고 */}
+        <div className="px-5 pt-7 pb-4">
+          <div className="flex items-center gap-3 mb-8">
+            <div className="w-10 h-10 bg-[#003c69] rounded-xl flex items-center justify-center text-white">
+              <span className="material-symbols-outlined" style={{ fontSize: 20 }}>anchor</span>
+            </div>
+            <div>
+              <h1 className="font-bold text-[#003c69] text-sm leading-tight" style={{ fontFamily: "'Manrope', sans-serif" }}>BWTS Monitor</h1>
+              <p className="text-[11px] text-slate-500">Vessel Logistics</p>
+            </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          {/* 네비게이션 */}
+          <nav className="space-y-1">
+            <div className="flex items-center gap-3 px-4 py-2.5 bg-white text-[#003c69] rounded-xl shadow-sm text-sm font-semibold cursor-default">
+              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>dashboard</span>
+              Dashboard
+            </div>
+            <div className="flex items-center gap-3 px-4 py-2.5 text-slate-500 hover:text-[#003c69] hover:bg-white/70 rounded-xl text-sm font-medium cursor-default transition-colors">
+              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>sailing</span>
+              Ship Logs
+            </div>
+            <div className="flex items-center gap-3 px-4 py-2.5 text-slate-500 hover:text-[#003c69] hover:bg-white/70 rounded-xl text-sm font-medium cursor-default transition-colors">
+              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>assessment</span>
+              Reports
+            </div>
             {isAdmin && (
               <button
                 onClick={() => setShowManager(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-lg transition-colors"
+                className="w-full flex items-center gap-3 px-4 py-2.5 text-slate-500 hover:text-[#003c69] hover:bg-white/70 rounded-xl text-sm font-medium cursor-pointer transition-colors text-left"
               >
-                🛳 선박관리
+                <span className="material-symbols-outlined" style={{ fontSize: 18 }}>settings_applications</span>
+                선박 관리
               </button>
             )}
-
-            {accessToken ? (
-              <div className="flex items-center gap-2">
-                <div className="hidden sm:flex flex-col items-end">
-                  {userEmail && (
-                    <span className="text-xs text-slate-500 leading-tight">{userEmail}</span>
-                  )}
-                  {isAdmin && (
-                    <span className="text-[10px] bg-amber-100 text-amber-700 border border-amber-300 px-1.5 py-0.5 rounded-full leading-tight">
-                      관리자
-                    </span>
-                  )}
-                </div>
-                <button
-                  onClick={handleLogout}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-green-50 hover:bg-green-100 text-green-700 border border-green-200 rounded-lg transition-colors"
-                >
-                  <span className="w-2 h-2 bg-green-500 rounded-full" />
-                  로그아웃
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={handleLogin}
-                disabled={authLoading || !isConfigured}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 text-white rounded-lg transition-colors"
-              >
-                {authLoading ? (
-                  <>
-                    <span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-                    인증중...
-                  </>
-                ) : (
-                  "🔑 Google 로그인"
-                )}
-              </button>
-            )}
-          </div>
+          </nav>
         </div>
-      </header>
 
-      {/* ── 메인 컨텐츠 ── */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
-        {!isConfigured && (
-          <div className="mb-6 bg-amber-50 border border-amber-200 rounded-xl px-5 py-4">
-            <div className="text-amber-700 font-medium text-sm mb-1">⚙️ API 키 설정 필요</div>
-            <p className="text-amber-600 text-xs leading-relaxed">
-              <code className="bg-amber-100 px-1 rounded text-amber-800">src/config.js</code>에서{" "}
-              <code className="bg-amber-100 px-1 rounded text-amber-800">GOOGLE_CLIENT_ID</code>,{" "}
-              <code className="bg-amber-100 px-1 rounded text-amber-800">GEMINI_API_KEY</code>,{" "}
-              <code className="bg-amber-100 px-1 rounded text-amber-800">DRIVE_ROOT_FOLDER_ID</code>,{" "}
-              <code className="bg-amber-100 px-1 rounded text-amber-800">ADMIN_EMAIL</code>을 입력하세요.
-            </p>
-          </div>
-        )}
-
-        {authError && (
-          <div className="mb-4 bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-600">
-            {authError}
-          </div>
-        )}
-        {sheetsError && (
-          <div className="mb-4 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-700 flex justify-between items-center">
-            <span>⚠️ {sheetsError}</span>
-            <button onClick={() => setSheetsError("")} className="text-amber-400 hover:text-amber-600 ml-4">✕</button>
-          </div>
-        )}
-
-        {!autoLoginDone ? (
-          <div className="flex items-center justify-center min-h-[60vh]">
-            <span className="w-6 h-6 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin" />
-          </div>
-        ) : accessToken ? (
-          <Dashboard
-            vessels={vessels}
-            setVessels={setVessels}
-            accessToken={accessToken}
-            isAdmin={isAdmin}
-          />
-        ) : (
-          <div className="flex flex-col items-center justify-center min-h-[60vh] gap-6">
-            <div className="bg-white border border-slate-200 rounded-2xl shadow-sm px-10 py-10 flex flex-col items-center gap-5 max-w-sm w-full">
-              <span className="text-5xl">🚢</span>
-              <div className="text-center">
-                <div className="font-bold text-slate-800 text-lg mb-1">BWTS LOG ANALYZER</div>
-                <div className="text-slate-500 text-sm">회사 계정으로 로그인하여 이용하세요</div>
-              </div>
-              {authError && (
-                <div className="w-full bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-600 text-center">
-                  {authError}
+        {/* 하단 사용자 영역 */}
+        <div className="mt-auto px-5 py-5 border-t border-slate-200/70 space-y-1">
+          {accessToken ? (
+            <>
+              <div className="flex items-center gap-3 px-3 py-2 mb-1">
+                <div className="w-8 h-8 rounded-full bg-[#003c69] text-white text-xs flex items-center justify-center font-bold shrink-0">
+                  {initials}
                 </div>
-              )}
+                <div className="min-w-0">
+                  <p className="text-xs font-medium text-slate-700 truncate">{userEmail}</p>
+                  {isAdmin && <p className="text-[10px] text-amber-600 font-semibold">관리자</p>}
+                </div>
+              </div>
+              <button
+                onClick={handleLogout}
+                className="w-full flex items-center gap-3 px-4 py-2.5 text-slate-500 hover:text-red-500 hover:bg-red-50 rounded-xl text-sm font-medium transition-colors text-left"
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: 18 }}>logout</span>
+                로그아웃
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={handleLogin}
+              disabled={authLoading || !isConfigured}
+              className="w-full flex items-center gap-3 px-4 py-2.5 text-[#003c69] bg-white hover:bg-blue-50 rounded-xl text-sm font-semibold transition-colors text-left shadow-sm"
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>login</span>
+              {authLoading ? "인증중..." : "Google 로그인"}
+            </button>
+          )}
+        </div>
+      </aside>
+
+      {/* ── 메인 콘텐츠 ── */}
+      <div className="flex-1 ml-64 flex flex-col min-h-screen">
+        {/* 상단 헤더 */}
+        <header className="sticky top-0 z-40 bg-[#f7f9fb] border-b border-slate-200/60 px-8 py-4 flex items-center justify-between">
+          <h2 className="text-lg font-bold text-[#003c69]" style={{ fontFamily: "'Manrope', sans-serif" }}>
+            BWTS Log Analyzer
+          </h2>
+          <div className="flex items-center gap-3">
+            {!accessToken && (
               <button
                 onClick={handleLogin}
                 disabled={authLoading || !isConfigured}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 text-white text-sm font-medium rounded-xl transition-colors"
+                className="flex items-center gap-2 px-4 py-2 text-sm bg-[#003c69] hover:bg-[#004d8a] disabled:bg-slate-200 disabled:text-slate-400 text-white rounded-lg transition-colors font-medium"
               >
                 {authLoading ? (
-                  <>
-                    <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-                    인증중...
-                  </>
+                  <><span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />인증중...</>
                 ) : (
-                  <>🔑 Google 로그인 (@ekmtc.com)</>
+                  <><span className="material-symbols-outlined" style={{ fontSize: 16 }}>key</span>Google 로그인</>
                 )}
               </button>
-              <p className="text-xs text-slate-400 text-center">ekmtc.com 도메인 계정만 접근 가능합니다</p>
-            </div>
+            )}
           </div>
-        )}
-      </main>
+        </header>
+
+        {/* 콘텐츠 */}
+        <main className="flex-1 px-8 py-6">
+          {!isConfigured && (
+            <div className="mb-5 bg-amber-50 border border-amber-200 rounded-xl px-5 py-4">
+              <div className="text-amber-700 font-medium text-sm mb-1">⚙️ API 키 설정 필요</div>
+              <p className="text-amber-600 text-xs leading-relaxed">
+                <code className="bg-amber-100 px-1 rounded text-amber-800">src/config.js</code>에서 GOOGLE_CLIENT_ID, GEMINI_API_KEY, DRIVE_ROOT_FOLDER_ID, ADMIN_EMAIL을 입력하세요.
+              </p>
+            </div>
+          )}
+
+          {authError && (
+            <div className="mb-4 bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-600">
+              {authError}
+            </div>
+          )}
+          {sheetsError && (
+            <div className="mb-4 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-700 flex justify-between items-center">
+              <span>⚠️ {sheetsError}</span>
+              <button onClick={() => setSheetsError("")} className="text-amber-400 hover:text-amber-600 ml-4">✕</button>
+            </div>
+          )}
+
+          {!autoLoginDone ? (
+            <div className="flex items-center justify-center min-h-[60vh]">
+              <span className="w-6 h-6 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin" />
+            </div>
+          ) : accessToken ? (
+            <Dashboard
+              vessels={vessels}
+              setVessels={setVessels}
+              accessToken={accessToken}
+              isAdmin={isAdmin}
+            />
+          ) : (
+            <div className="flex flex-col items-center justify-center min-h-[60vh] gap-6">
+              <div className="bg-white border border-slate-200 rounded-2xl shadow-sm px-10 py-10 flex flex-col items-center gap-5 max-w-sm w-full">
+                <div className="w-16 h-16 bg-[#003c69] rounded-2xl flex items-center justify-center text-white">
+                  <span className="material-symbols-outlined" style={{ fontSize: 32 }}>anchor</span>
+                </div>
+                <div className="text-center">
+                  <div className="font-bold text-slate-800 text-lg mb-1" style={{ fontFamily: "'Manrope', sans-serif" }}>BWTS LOG ANALYZER</div>
+                  <div className="text-slate-500 text-sm">회사 계정으로 로그인하여 이용하세요</div>
+                </div>
+                {authError && (
+                  <div className="w-full bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-600 text-center">{authError}</div>
+                )}
+                <button
+                  onClick={handleLogin}
+                  disabled={authLoading || !isConfigured}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-[#003c69] hover:bg-[#004d8a] disabled:bg-slate-200 disabled:text-slate-400 text-white text-sm font-semibold rounded-xl transition-colors"
+                >
+                  {authLoading ? (
+                    <><span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />인증중...</>
+                  ) : (
+                    <><span className="material-symbols-outlined" style={{ fontSize: 18 }}>key</span>Google 로그인 (@ekmtc.com)</>
+                  )}
+                </button>
+                <p className="text-xs text-slate-400 text-center">ekmtc.com 도메인 계정만 접근 가능합니다</p>
+              </div>
+            </div>
+          )}
+        </main>
+      </div>
 
       {showManager && isAdmin && (
         <VesselManager
