@@ -131,7 +131,7 @@ function StatusBadge({ status, summary, reviewed }) {
 
   return (
     <div className="flex flex-col gap-1">
-      <div className="flex items-center gap-1.5 flex-wrap">
+      <div className="flex items-center gap-1.5">
         <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border w-fit whitespace-nowrap ${s.cls}`}>
           <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${s.dot}`} />
           {s.label}
