@@ -142,12 +142,12 @@ ${SEP}
 ${buildAlarmTable()}
 
 [분석 결과]
-  운전 현황 : ${opsLine || "-"}
+  [운전 현황] ${opsLine || "-"}
 
-  조치 요청 :
+  [조치 요청]
 ${buildActionItems()}
 
-  종합 평가 :
+  [종합 평가]
 ${buildSummaryLines()}
 ${memoText ? `\n[담당자 메모]\n  ${memoText}\n` : ""}
 ${SEP2}
@@ -170,12 +170,12 @@ ${SEP}
 ${buildAlarmTable()}
 
 [ANALYSIS RESULTS]
-  Operations : ${opsLineEn || "-"}
+  [Operations] ${opsLineEn || "-"}
 
-  Actions Required :
+  [Actions Required]
 ${buildActionItems()}
 
-  Summary :
+  [Summary]
 ${buildSummaryLines()}
 ${memoText ? `\n[OPERATOR MEMO]\n  ${memoText}\n` : ""}
 ${SEP2}
