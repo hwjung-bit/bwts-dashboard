@@ -254,37 +254,34 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
     setAnalyzeError("");
     try {
       const monthData = await collectMonthData(CONFIG.DRIVE_ROOT_FOLDER_ID, year, month, accessToken);
-      await Promise.allSettled(
-        vessels.map(async (vessel) => {
-          const mk = (vessel.vesselCode || vessel.name).toLowerCase();
-          const entry = monthData.find((d) => d.vesselFolderName.toLowerCase().includes(mk));
-          if (!entry || entry.pdfs.length === 0) {
-            // Drive 폴더 없음 → 기존 상태 그대로 유지
-            return;
-          }
-          // 폴더 있는 선박만 LOADING → 분석
-          const displayName = vessel.vesselCode || vessel.name;
-          setAnalyzingNames((prev) => [...prev, displayName]);
-          updateMonthlyVessel(vessel.id, { analysisStatus: "LOADING", analysisResult: null, analysisError: null });
-          try {
-            const logPdfs = filterLogPdfs(entry.pdfs);
-            const result = await analyzePdfFromDrive(logPdfs, accessToken, vessel);
-            const mapped = mapOverallStatus(result?.overall_status, result?.error_alarms);
-            const finalStatus = mapped === "NO_DATA" ? "RECEIVED" : mapped;
-            updateMonthlyVessel(vessel.id, {
-              analysisStatus: finalStatus,
-              analysisResult: result,
-              analysisError: null,
-              lastAnalyzed: new Date().toISOString(),
-            });
-          } catch (err) {
-            // 분석 실패 시 수신 상태 유지 (파일은 존재함)
-            updateMonthlyVessel(vessel.id, { analysisStatus: "RECEIVED", analysisError: err.message });
-          } finally {
-            setAnalyzingNames((prev) => prev.filter((n) => n !== displayName));
-          }
-        })
-      );
+      const targets = vessels.filter((vessel) => {
+        const mk = (vessel.vesselCode || vessel.name).toLowerCase();
+        const entry = monthData.find((d) => d.vesselFolderName.toLowerCase().includes(mk));
+        return entry && entry.pdfs.length > 0;
+      });
+
+      for (const vessel of targets) {
+        const mk = (vessel.vesselCode || vessel.name).toLowerCase();
+        const entry = monthData.find((d) => d.vesselFolderName.toLowerCase().includes(mk));
+        const displayName = vessel.vesselCode || vessel.name;
+        setAnalyzingNames([displayName]);
+        updateMonthlyVessel(vessel.id, { analysisStatus: "LOADING", analysisResult: null, analysisError: null });
+        try {
+          const logPdfs = filterLogPdfs(entry.pdfs);
+          const result = await analyzePdfFromDrive(logPdfs, accessToken, vessel);
+          const mapped = mapOverallStatus(result?.overall_status, result?.error_alarms);
+          const finalStatus = mapped === "NO_DATA" ? "RECEIVED" : mapped;
+          updateMonthlyVessel(vessel.id, {
+            analysisStatus: finalStatus,
+            analysisResult: result,
+            analysisError: null,
+            lastAnalyzed: new Date().toISOString(),
+          });
+        } catch (err) {
+          updateMonthlyVessel(vessel.id, { analysisStatus: "RECEIVED", analysisError: err.message });
+          setAnalyzeError(`${displayName} 분석 실패: ${err.message}`);
+        }
+      }
     } catch (err) {
       setAnalyzeError(`분석 실패: ${err.message}`);
     } finally {

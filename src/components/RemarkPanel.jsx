@@ -6,6 +6,33 @@ import { sendMail, buildMailBody, buildMailSubject } from '../services/gmailServ
 
 export default function RemarkPanel({ vessel, analysisResult, accessToken, onUpdate, period }) {
   const lang = vessel?.mailLang || "ko";
+  const t = lang === "en" ? {
+    panelTitle:    "Review & Vessel Instructions",
+    reviewLabel:   "Review Notes",
+    saveNote:      "Save Note",
+    genAi:         "Generate AI Remark",
+    markReviewed:  "✓ Reviewed",
+    confirmNormal: "✅ Confirmed Normal",
+    mailBtn:       "✉️ Send Instructions",
+    recipientLbl:  "Recipient Email",
+    previewLbl:    "Mail Preview",
+    cancelBtn:     "Cancel",
+    sendBtn:       "✉️ Send",
+    reviewedBadge: "✓ Reviewed",
+  } : {
+    panelTitle:    "검토 & 본선 지침 전달",
+    reviewLabel:   "담당자 검토 내용",
+    saveNote:      "메모 저장",
+    genAi:         "🤖 AI 리마크 생성",
+    markReviewed:  "✓ 검토 완료",
+    confirmNormal: "✅ 정상 확인",
+    mailBtn:       "✉️ 본선 지침 전달",
+    recipientLbl:  "수신자 이메일",
+    previewLbl:    "본문 미리보기",
+    cancelBtn:     "취소",
+    sendBtn:       "✉️ 발송 확인",
+    reviewedBadge: "✓ 검토완료",
+  };
   const [note, setNote]     = useState(vessel?.reviewNote || "");
   const [remark, setRemark] = useState(vessel?.reviewRemark || "");
   const [aiLoading, setAiLoading] = useState(false);
@@ -66,7 +93,8 @@ export default function RemarkPanel({ vessel, analysisResult, accessToken, onUpd
     setSendError("");
     try {
       const subject = buildMailSubject(vessel, analysisResult?.period || period || "-", analysisResult?.overall_status, lang);
-      const body = buildMailBody(vessel, analysisResult || {}, remark || note || "", lang);
+      // 메일에는 담당자 직접 입력 note만 사용 (AI 생성 remark는 앱 내부 전용)
+      const body = buildMailBody(vessel, analysisResult || {}, note || "", lang);
       await sendMail({ to: emailTo, subject, body, accessToken });
       setSent(true);
       setShowEmail(false);
@@ -82,10 +110,10 @@ export default function RemarkPanel({ vessel, analysisResult, accessToken, onUpd
     <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-5 mt-4">
       {/* 헤더 */}
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-sm font-semibold text-slate-700">📝 검토 &amp; 본선 지침 전달</h3>
+        <h3 className="text-sm font-semibold text-slate-700">📝 {t.panelTitle}</h3>
         {isReviewed && (
           <span className="text-xs bg-indigo-100 text-indigo-700 border border-indigo-200 px-2.5 py-1 rounded-full font-medium">
-            ✓ 검토완료
+            {t.reviewedBadge}
             {vessel?.reviewedAt && (
               <span className="ml-1 opacity-70">
                 {new Date(vessel.reviewedAt).toLocaleDateString("ko-KR")}
@@ -97,7 +125,7 @@ export default function RemarkPanel({ vessel, analysisResult, accessToken, onUpd
 
       {/* 담당자 검토 내용 */}
       <div className="mb-4">
-        <label className="block text-xs text-slate-500 mb-2 font-medium">담당자 검토 내용</label>
+        <label className="block text-xs text-slate-500 mb-2 font-medium">{t.reviewLabel}</label>
         <textarea
           value={note}
           onChange={(e) => setNote(e.target.value)}
@@ -113,7 +141,7 @@ export default function RemarkPanel({ vessel, analysisResult, accessToken, onUpd
           onClick={handleSaveNote}
           className="px-4 py-2 text-sm bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-lg transition-colors"
         >
-          메모 저장
+          {t.saveNote}
         </button>
         <button
           onClick={handleGenerateAi}
@@ -122,7 +150,7 @@ export default function RemarkPanel({ vessel, analysisResult, accessToken, onUpd
         >
           {aiLoading ? (
             <><span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" />AI 생성중...</>
-          ) : "🤖 AI 리마크 생성"}
+          ) : t.genAi}
         </button>
         {!isReviewed && analysisResult && (
           <>
@@ -130,14 +158,14 @@ export default function RemarkPanel({ vessel, analysisResult, accessToken, onUpd
               onClick={handleMarkReviewed}
               className="px-4 py-2 text-sm text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors"
             >
-              ✓ 검토 완료
+              {t.markReviewed}
             </button>
             {["CRITICAL", "WARNING"].includes(vessel?.analysisStatus) && (
               <button
                 onClick={handleNormalOverride}
                 className="px-4 py-2 text-sm text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors"
               >
-                ✅ 정상 확인
+                {t.confirmNormal}
               </button>
             )}
           </>
@@ -180,12 +208,12 @@ export default function RemarkPanel({ vessel, analysisResult, accessToken, onUpd
               onClick={() => setShowEmail(true)}
               className="px-4 py-2 text-sm bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors"
             >
-              ✉️ 본선 지침 전달
+              {t.mailBtn}
             </button>
           ) : (
             <div className="flex flex-col gap-3">
               <div>
-                <label className="block text-xs text-slate-500 mb-1.5 font-medium">수신자 이메일</label>
+                <label className="block text-xs text-slate-500 mb-1.5 font-medium">{t.recipientLbl}</label>
                 <input
                   type="email"
                   value={emailTo}
@@ -194,10 +222,10 @@ export default function RemarkPanel({ vessel, analysisResult, accessToken, onUpd
                 />
               </div>
 
-              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
-                <div className="text-xs text-slate-400 mb-2 font-medium">본문 미리보기</div>
-                <pre className="text-xs text-slate-600 whitespace-pre-wrap font-sans leading-relaxed max-h-40 overflow-y-auto">
-                  {buildMailBody(vessel, analysisResult || {}, remark || note || "", lang)}
+              <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
+                <div className="text-xs text-blue-600 font-medium mb-2">{t.previewLbl}</div>
+                <pre className="text-xs text-slate-700 whitespace-pre-wrap font-mono leading-relaxed max-h-64 overflow-y-auto">
+                  {buildMailBody(vessel, analysisResult || {}, note || "", lang)}
                 </pre>
               </div>
 
@@ -212,7 +240,7 @@ export default function RemarkPanel({ vessel, analysisResult, accessToken, onUpd
                   onClick={() => setShowEmail(false)}
                   className="flex-1 px-4 py-2 text-sm bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-lg transition-colors"
                 >
-                  취소
+                  {t.cancelBtn}
                 </button>
                 <button
                   onClick={handleSendEmail}
@@ -221,7 +249,7 @@ export default function RemarkPanel({ vessel, analysisResult, accessToken, onUpd
                 >
                   {sending ? (
                     <><span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" />발송중...</>
-                  ) : "✉️ 발송 확인"}
+                  ) : t.sendBtn}
                 </button>
               </div>
             </div>

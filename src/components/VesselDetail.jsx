@@ -126,8 +126,8 @@ export default function VesselDetail({ vessel, onClose }) {
                 <div className="text-xs text-slate-300 mt-1">정상: 5~10 ppm</div>
               </div>
               <div className="text-center bg-white border border-slate-200 rounded-xl p-3">
-                <div className="text-xs text-slate-400 mb-1">배출 평균</div>
-                <div className="text-2xl font-bold text-blue-600">{tro.deballasting_avg ?? "-"}</div>
+                <div className="text-xs text-slate-400 mb-1">배출 최댓값</div>
+                <div className="text-2xl font-bold text-blue-600">{tro.deballasting_max ?? "-"}</div>
                 <div className="text-xs text-slate-400">ppm</div>
                 <div className="text-xs text-slate-300 mt-1">기준: &lt;0.1 ppm</div>
               </div>
@@ -213,10 +213,10 @@ export default function VesselDetail({ vessel, onClose }) {
             </dl>
           </div>
 
-          {/* AI 분석 요약 — 선박 정보 아래 */}
+          {/* AI 분석 결과 — 선박 정보 아래 */}
           {r?.ai_remarks && (
             <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
-              <div className="text-xs text-blue-600 font-medium mb-2">🤖 AI 분석 요약</div>
+              <div className="text-xs text-blue-600 font-medium mb-2">🤖 AI 분석 결과</div>
               <div className="text-sm text-slate-700 leading-relaxed space-y-1.5">
                 {(Array.isArray(r.ai_remarks)
                   ? r.ai_remarks
@@ -241,11 +241,22 @@ export default function VesselDetail({ vessel, onClose }) {
                       <span className="mr-1">⚠️</span>{line}
                     </p>
                   );
-                  if (isSummary) return (
-                    <p key={i} className="text-slate-800 font-medium pt-0.5">
-                      <span className="mr-1">💡</span>{line}
-                    </p>
-                  );
+                  if (isSummary) {
+                    const prefix    = line.match(/^\[[^\]]+\]\s*/)?.[0] || "";
+                    const body      = line.slice(prefix.length);
+                    const sentences = body.split(/(?<=\.)\s+/).filter(Boolean);
+                    return (
+                      <div key={i} className="pt-0.5">
+                        <p className="text-slate-800 font-medium">
+                          <span className="mr-1">💡</span>
+                          <span className="font-semibold">{prefix.trim()}</span>
+                        </p>
+                        {sentences.map((s, j) => (
+                          <p key={j} className="text-slate-700 pl-5 mt-0.5">{s}</p>
+                        ))}
+                      </div>
+                    );
+                  }
                   return <p key={i} className="text-slate-600 pl-2">{line}</p>;
                 })}
               </div>

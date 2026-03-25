@@ -41,71 +41,148 @@ function formatAlarmLine(g) {
  * 메일 본문 자동 생성
  * @param {Object} vessel
  * @param {Object} analysisResult
- * @param {string} finalRemark
- * @param {"ko"|"en"} lang - 메일 언어 (기본 "ko")
+ * @param {string} finalRemark  - 담당자 검토 메모 (brief)
+ * @param {"ko"|"en"} lang
  */
 export function buildMailBody(vessel, analysisResult, finalRemark, lang = "ko") {
   const { vessel_name, period, overall_status, error_alarms, ai_remarks, ai_remarks_en } = analysisResult;
-  const grouped = groupAlarmsByCode(error_alarms);
-  const alarmLines = grouped.length > 0
-    ? grouped.map(formatAlarmLine).join("\n")
-    : (lang === "en" ? "  - None" : "  - 없음");
+  const grouped  = groupAlarmsByCode(error_alarms ?? []);
+  const shipName = vessel_name || vessel?.name || "-";
 
-  const statusMap = { NORMAL: lang === "en" ? "NORMAL" : "정상",
-                      WARNING: lang === "en" ? "WARNING" : "주의",
-                      CRITICAL: lang === "en" ? "CRITICAL" : "이상" };
-  const statusLabel = statusMap[overall_status] || overall_status || "-";
-  const shipName = vessel_name || vessel.name || "-";
-  const sep = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
+  const remarksArr   = Array.isArray(ai_remarks)    ? ai_remarks    : (ai_remarks    ? [String(ai_remarks)]    : []);
+  const remarksEnArr = Array.isArray(ai_remarks_en) ? ai_remarks_en : (ai_remarks_en ? [String(ai_remarks_en)] : []);
 
-  if (lang === "en") {
-    return `Dear Sir/Madam,
+  // ── 운전 현황 한 줄 추출 ───────────────────────────────────
+  function getOpsLine(arr) {
+    const l = arr.find(r => /^\[(운전 현황|Operations)\]/i.test(r));
+    return l ? l.replace(/^\[[^\]]+\]\s*/, "") : null;
+  }
 
-Please find below the BWTS operation log analysis report for ${shipName} (${period}).
+  // ── 알람 테이블 (가독성 최우선, 짧게) ─────────────────────
+  function buildAlarmTable() {
+    if (grouped.length === 0) return lang === "en" ? "  (None)" : "  (없음)";
+    const rows = grouped.map(g => {
+      const cnt = [
+        g.trip    ? `Trip×${g.trip}`    : "",
+        g.alarm   ? `Alarm×${g.alarm}`  : "",
+        g.warning ? `Warn×${g.warning}` : "",
+      ].filter(Boolean).join(" / ");
+      const code = (g.code || "-").padEnd(11);
+      const desc = (g.description || "").replace(/\s*\(\s*×\d+회?\s*\)/g, "").substring(0, 38).padEnd(40);
+      return `  ${code} ${desc} ${cnt}`;
+    });
+    const hdr = lang === "en"
+      ? "  Code        Description                              Count"
+      : "  코드         내용                                      수준/횟수";
+    return [hdr, "  " + "─".repeat(62), ...rows].join("\n");
+  }
 
-${sep}
-■ Analysis Result : ${statusLabel}
-${sep}
+  // ── 조치 요청 추출 (코드별 —이후 핵심 액션만) ─────────────
+  function buildActionItems() {
+    const useArr = lang === "en" && remarksEnArr.length > 0 ? remarksEnArr : remarksArr;
+    const actions = [];
 
-▶ AI Summary
-${ai_remarks_en || ai_remarks || "-"}
+    // 배출 TRO IMO 초과 여부를 운전 현황에서 별도 추출
+    const opsLine = getOpsLine(useArr) || "";
+    const troMatch = opsLine.match(/배출 TRO ([\d.]+)ppm.*IMO.*초과/);
+    if (troMatch) {
+      actions.push(`  1. 배출 TRO ${troMatch[1]}ppm — IMO 기준(0.1ppm) 초과 확인 및 중화 시스템 점검 필요`);
+    }
 
-▶ Alarm / Error Summary (grouped by code)
-${alarmLines}
+    // 코드별 액션 (— 이후 텍스트)
+    const codeActions = useArr
+      .filter(l => /^\[(CODE|VRCS_ERR)/i.test(l) && l.includes("—"))
+      .map(l => {
+        const codeMatch = l.match(/^\[([^\]]+)\]/);
+        const code = codeMatch ? codeMatch[1] : "";
+        const action = l.split("—").slice(1).join("—").trim()
+          .replace(/\s*권장\.?\s*$/, "").replace(/\s*권고\.?\s*$/, "");
+        return `  · [${code}] ${action}`;
+      });
 
-▶ Technical Review (operator remarks)
-${finalRemark || "-"}
+    actions.push(...codeActions);
 
-${sep}
-Kindly review the above findings and advise on any corrective actions taken or planned.
+    return actions.length > 0 ? actions.join("\n") : (lang === "en" ? "  · No action required." : "  · 특이 조치사항 없음.");
+  }
+
+  // ── 종합 평가 문장 분리 ────────────────────────────────────
+  function buildSummaryLines() {
+    const useArr = lang === "en" && remarksEnArr.length > 0 ? remarksEnArr : remarksArr;
+    const summaryLine = useArr.find(l => /^\[(종합|Summary)\]/i.test(l));
+    if (!summaryLine) return lang === "en" ? "  (None)" : "  (없음)";
+    const body = summaryLine.replace(/^\[[^\]]+\]\s*/, "");
+    const sentences = body.split(/(?<=\.)\s+/).filter(Boolean);
+    return sentences.map(s => `  · ${s}`).join("\n");
+  }
+
+  // ── 담당자 메모 (길면 100자 요약) ─────────────────────────
+  const memoText = finalRemark
+    ? (finalRemark.length > 200
+        ? finalRemark.substring(0, 200).replace(/\n+/g, " ").trimEnd() + "..."
+        : finalRemark)
+    : "";
+
+  const statusKo = { NORMAL: "정상", WARNING: "주의", CRITICAL: "이상 ⚠" }[overall_status] || overall_status || "-";
+  const statusEn = { NORMAL: "NORMAL", WARNING: "WARNING", CRITICAL: "CRITICAL" }[overall_status] || overall_status || "-";
+  const SEP  = "─".repeat(48);
+  const SEP2 = "─".repeat(48);
+
+  // ━━━━ 한국어 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  if (lang !== "en") {
+    const opsLine = getOpsLine(remarksArr);
+    return `안녕하세요,
+
+${shipName} 선박의 ${period} BWTS 운전 로그 분석 결과입니다.
+
+${SEP}
+  선박 : ${shipName}     기간 : ${period}     결과 : ${statusKo}
+${SEP}
+
+[발생 알람]
+${buildAlarmTable()}
+
+[분석 결과]
+  운전 현황 : ${opsLine || "-"}
+
+  조치 요청 :
+${buildActionItems()}
+
+  종합 평가 :
+${buildSummaryLines()}
+${memoText ? `\n[담당자 메모]\n  ${memoText}\n` : ""}
+${SEP2}
+위 사항 확인 후 조치 결과를 회신해 주시기 바랍니다.
+감사합니다.
+BWTS 관리 담당자`;
+  }
+
+  // ━━━━ English ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  const opsLineEn = getOpsLine(remarksEnArr.length > 0 ? remarksEnArr : remarksArr);
+  return `Dear Sir/Madam,
+
+Please find the BWTS operation log analysis for ${shipName} (${period}).
+
+${SEP}
+  Vessel : ${shipName}     Period : ${period}     Result : ${statusEn}
+${SEP}
+
+[ALARM SUMMARY]
+${buildAlarmTable()}
+
+[ANALYSIS RESULTS]
+  Operations : ${opsLineEn || "-"}
+
+  Actions Required :
+${buildActionItems()}
+
+  Summary :
+${buildSummaryLines()}
+${memoText ? `\n[OPERATOR MEMO]\n  ${memoText}\n` : ""}
+${SEP2}
+Please reply with corrective actions taken or planned.
 
 Best regards,
 BWTS Management Team`;
-  }
-
-  return `안녕하세요,
-
-${shipName} 선박의 ${period} BWTS 운전 로그 검토 결과를 아래와 같이 전달드립니다.
-
-${sep}
-■ 분석 기간 : ${period}
-■ 분석 결과 : ${statusLabel}
-${sep}
-
-▶ AI 분석 요약
-${ai_remarks || "-"}
-
-▶ 알람/에러 요약 (코드별)
-${alarmLines}
-
-▶ 담당자 검토 의견
-${finalRemark || "-"}
-
-${sep}
-위 사항을 확인하시고 조치 결과를 회신하여 주시기 바랍니다.
-
-감사합니다.
-BWTS 관리 담당자 드림`;
 }
 
 /**
