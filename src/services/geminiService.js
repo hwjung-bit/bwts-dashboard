@@ -681,23 +681,38 @@ function validateOperationDates(data) {
   }
 }
 
-// ── 운전 0회인데 TRO 값이 있거나 알람이 있는 경우 경고 ────────
+// ── 운전 0회 처리 ─────────────────────────────────────────────
 function checkZeroOperations(data) {
-  const ops = data.operations || [];
-  const tro = data.tro_data || {};
+  const ops    = data.operations || [];
   const alarms = data.error_alarms || [];
-  // 운전이 0회인데 TRO 또는 알람이 있으면 → 추출 실패 가능성
-  if (ops.length === 0 && (tro.ballasting_avg != null || tro.deballasting_avg != null || alarms.length > 0)) {
-    const note = "⚠️ 운전 기록 0건 추출됨 — OperationTimeReport 누락 또는 PDF 인식 오류 가능성. 재분석 권장.";
-    const noteEn = "⚠️ 0 operations extracted — possible missing OperationTimeReport or PDF parsing error. Re-analysis recommended.";
-    const remarksArr = Array.isArray(data.ai_remarks) ? data.ai_remarks : [];
-    if (!remarksArr.some((l) => l.includes("운전 기록 0건"))) remarksArr.unshift(note);
-    data.ai_remarks = remarksArr;
-    const remarksEnArr = Array.isArray(data.ai_remarks_en) ? data.ai_remarks_en : [];
-    if (!remarksEnArr.some((l) => l.includes("0 operations"))) remarksEnArr.unshift(noteEn);
-    data.ai_remarks_en = remarksEnArr;
-    if (data.overall_status === "NORMAL") data.overall_status = "WARNING";
+  if (ops.length > 0) return; // 운전 기록 있으면 스킵
+
+  const remarksArr   = Array.isArray(data.ai_remarks)    ? data.ai_remarks    : [];
+  const remarksEnArr = Array.isArray(data.ai_remarks_en) ? data.ai_remarks_en : [];
+
+  // ai_remarks에 운전 현황 원소가 이미 있으면 스킵
+  const hasOpsNote = remarksArr.some((l) =>
+    l.includes("운전") && (l.includes("없") || l.includes("0회") || l.includes("미운전"))
+  );
+  if (hasOpsNote) return;
+
+  // 알람은 있지만 운전이 없는 경우 (예: ECS 비정상 종료, 시험 중 알람)
+  if (alarms.length > 0) {
+    const note   = "[운전 현황] 당월 운전 기록이 없습니다. (알람 발생 이력 있음 — 아래 확인)";
+    const noteEn = "[Operations] No ballasting/deballasting operations recorded this month. (Alarms detected — see below)";
+    remarksArr.unshift(note);
+    remarksEnArr.unshift(noteEn);
+  } else {
+    // 운전도 없고 알람도 없는 경우
+    const note   = "[운전 현황] 당월 운전 기록이 없습니다.";
+    const noteEn = "[Operations] No ballasting/deballasting operations recorded this month.";
+    remarksArr.unshift(note);
+    remarksEnArr.unshift(noteEn);
   }
+
+  data.ai_remarks    = remarksArr;
+  data.ai_remarks_en = remarksEnArr;
+  // overall_status는 AI 판정 그대로 유지 (강제 변경 없음)
 }
 
 // ── ai_remarks 비어있을 때 기본 요약 자동 생성 ────────────────
@@ -720,6 +735,9 @@ function autoFillRemarks(data) {
   if (ballastCount || deballastCount) {
     parts.push(`당월 주입 ${ballastCount}회 / 배출 ${deballastCount}회 운전.`);
     partsEn.push(`This month: ${ballastCount} ballasting / ${deballastCount} deballasting operations.`);
+  } else {
+    parts.push("당월 운전 기록이 없습니다.");
+    partsEn.push("No ballasting/deballasting operations recorded this month.");
   }
   if (tro.ballasting_avg != null) {
     parts.push(`주입 평균 TRO ${tro.ballasting_avg}ppm.`);
