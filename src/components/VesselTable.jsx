@@ -126,7 +126,7 @@ function StatusBadge({ status, summary }) {
   const s = STATUS_CONFIG[status] || STATUS_CONFIG.NO_DATA;
   return (
     <div className="flex flex-col gap-1">
-      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border w-fit ${s.cls}`}>
+      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border w-fit whitespace-nowrap ${s.cls}`}>
         <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${s.dot}`} />
         {s.label}
       </span>
@@ -166,7 +166,7 @@ export default function VesselTable({
           <thead>
             <tr className="bg-slate-50/80 border-b border-slate-100">
               <th className="text-left px-6 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider w-10">#</th>
-              <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">선박 코드</th>
+              <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider w-44">선박 / 기기</th>
               <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider w-36">종합 판단</th>
               <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider hidden lg:table-cell">주요 이상 항목</th>
               {isAdmin && (
@@ -199,17 +199,21 @@ export default function VesselTable({
                   </td>
 
                   {/* 선박 코드 */}
-                  <td className="px-4 py-4">
+                  <td className="px-4 py-4 w-44">
                     <div className="flex flex-col">
-                      <span className="font-bold text-slate-800">{v.vesselCode || v.name}</span>
-                      {v.imoNumber && (
-                        <span className="text-[11px] text-slate-400">IMO {v.imoNumber}</span>
-                      )}
+                      <span className="font-bold text-slate-800 whitespace-nowrap">{v.vesselCode || v.name}</span>
+                      {(v.manufacturer || v.model) ? (
+                        <span className="text-[11px] text-slate-400 whitespace-nowrap">
+                          {[v.manufacturer, v.model].filter(Boolean).join(' ')}
+                        </span>
+                      ) : v.imoNumber ? (
+                        <span className="text-[11px] text-slate-400 whitespace-nowrap">IMO {v.imoNumber}</span>
+                      ) : null}
                     </div>
                   </td>
 
                   {/* 종합 판단 */}
-                  <td className="px-4 py-4">
+                  <td className="px-4 py-4 w-36">
                     <StatusBadge status={v.analysisStatus || "NO_DATA"} summary={summary} />
                   </td>
 

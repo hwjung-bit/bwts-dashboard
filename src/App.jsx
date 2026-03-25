@@ -3,6 +3,7 @@ import { CONFIG, INITIAL_VESSELS } from "./config.js";
 import { readVessels, writeVessels } from "./services/sheetsService.js";
 import Dashboard from "./components/Dashboard.jsx";
 import VesselManager from "./components/VesselManager.jsx";
+import ShipLogs from "./components/ShipLogs.jsx";
 
 async function fetchUserEmail(accessToken) {
   const res = await fetch(`https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${accessToken}`);
@@ -37,6 +38,7 @@ export default function App() {
   const [autoLoginDone, setAutoLoginDone] = useState(false);
   const [showManager, setShowManager] = useState(false);
   const [sheetsError, setSheetsError] = useState("");
+  const [activeView, setActiveView] = useState("dashboard");
 
   const isAdmin = userEmail && CONFIG.ADMIN_EMAIL !== "YOUR_ADMIN_EMAIL@gmail.com"
     ? userEmail === CONFIG.ADMIN_EMAIL
@@ -167,17 +169,32 @@ export default function App() {
 
           {/* 네비게이션 */}
           <nav className="space-y-1">
-            <div className="flex items-center gap-3 px-4 py-2.5 bg-white text-[#003c69] rounded-xl shadow-sm text-sm font-semibold cursor-default">
+            <button
+              onClick={() => setActiveView("dashboard")}
+              className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors text-left ${
+                activeView === "dashboard"
+                  ? "bg-white text-[#003c69] shadow-sm"
+                  : "text-slate-500 hover:text-[#003c69] hover:bg-white/70"
+              }`}
+            >
               <span className="material-symbols-outlined" style={{ fontSize: 18 }}>dashboard</span>
               Dashboard
-            </div>
-            <div className="flex items-center gap-3 px-4 py-2.5 text-slate-500 hover:text-[#003c69] hover:bg-white/70 rounded-xl text-sm font-medium cursor-default transition-colors">
+            </button>
+            <button
+              onClick={() => setActiveView("shiplogs")}
+              className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors text-left ${
+                activeView === "shiplogs"
+                  ? "bg-white text-[#003c69] shadow-sm font-semibold"
+                  : "text-slate-500 hover:text-[#003c69] hover:bg-white/70"
+              }`}
+            >
               <span className="material-symbols-outlined" style={{ fontSize: 18 }}>sailing</span>
               Ship Logs
-            </div>
-            <div className="flex items-center gap-3 px-4 py-2.5 text-slate-500 hover:text-[#003c69] hover:bg-white/70 rounded-xl text-sm font-medium cursor-default transition-colors">
+            </button>
+            <div className="flex items-center gap-3 px-4 py-2.5 text-slate-300 rounded-xl text-sm font-medium cursor-not-allowed">
               <span className="material-symbols-outlined" style={{ fontSize: 18 }}>assessment</span>
               Reports
+              <span className="ml-auto text-[10px] bg-slate-100 text-slate-300 px-1.5 py-0.5 rounded-full">준비중</span>
             </div>
             {isAdmin && (
               <button
@@ -277,12 +294,16 @@ export default function App() {
               <span className="w-6 h-6 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin" />
             </div>
           ) : accessToken ? (
-            <Dashboard
-              vessels={vessels}
-              setVessels={setVessels}
-              accessToken={accessToken}
-              isAdmin={isAdmin}
-            />
+            activeView === "shiplogs" ? (
+              <ShipLogs vessels={vessels} />
+            ) : (
+              <Dashboard
+                vessels={vessels}
+                setVessels={setVessels}
+                accessToken={accessToken}
+                isAdmin={isAdmin}
+              />
+            )
           ) : (
             <div className="flex flex-col items-center justify-center min-h-[60vh] gap-6">
               <div className="bg-white border border-slate-200 rounded-2xl shadow-sm px-10 py-10 flex flex-col items-center gap-5 max-w-sm w-full">
