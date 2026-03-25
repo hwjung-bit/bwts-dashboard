@@ -62,8 +62,11 @@ export default function StatusCards({ vessels }) {
   const counts = { NORMAL: 0, WARNING: 0, CRITICAL: 0, REVIEWED: 0, RECEIVED: 0, NO_DATA: 0 };
   vessels.forEach((v) => {
     const s = v.analysisStatus || "NO_DATA";
-    if (s in counts) counts[s]++;
-    else counts.NO_DATA++;
+    // legacy REVIEWED → NORMAL로 카운트
+    const bucket = s === "REVIEWED" ? "NORMAL" : (s in counts ? s : "NO_DATA");
+    counts[bucket]++;
+    // 검토완료 별도 카운트 (reviewed 플래그 또는 legacy REVIEWED)
+    if (v.reviewed || s === "REVIEWED") counts.REVIEWED++;
   });
 
   const total = vessels.length || 1;

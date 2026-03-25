@@ -122,14 +122,26 @@ const STATUS_CONFIG = {
   },
 };
 
-function StatusBadge({ status, summary }) {
-  const s = STATUS_CONFIG[status] || STATUS_CONFIG.NO_DATA;
+function StatusBadge({ status, summary, reviewed }) {
+  // legacy REVIEWED → 검토완료 표기
+  const effectiveStatus = status === "REVIEWED" ? "NORMAL" : (status || "NO_DATA");
+  const isLegacyReviewed = status === "REVIEWED";
+  const showReviewed = reviewed || isLegacyReviewed;
+  const s = STATUS_CONFIG[effectiveStatus] || STATUS_CONFIG.NO_DATA;
+
   return (
     <div className="flex flex-col gap-1">
-      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border w-fit whitespace-nowrap ${s.cls}`}>
-        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${s.dot}`} />
-        {s.label}
-      </span>
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border w-fit whitespace-nowrap ${s.cls}`}>
+          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${s.dot}`} />
+          {s.label}
+        </span>
+        {showReviewed && (
+          <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-50 text-indigo-600 border border-indigo-200 whitespace-nowrap">
+            ✓ 검토
+          </span>
+        )}
+      </div>
       {summary && (
         <span className="text-[11px] text-slate-400 pl-1">{summary}</span>
       )}
@@ -214,7 +226,7 @@ export default function VesselTable({
 
                   {/* 종합 판단 */}
                   <td className="px-4 py-4 w-36">
-                    <StatusBadge status={v.analysisStatus || "NO_DATA"} summary={summary} />
+                    <StatusBadge status={v.analysisStatus || "NO_DATA"} summary={summary} reviewed={v.reviewed} />
                   </td>
 
                   {/* 주요 이상 항목 */}

@@ -18,10 +18,8 @@ export default function RemarkPanel({ vessel, analysisResult, accessToken, onUpd
   const [sent, setSent]             = useState(false);
   const [sendError, setSendError]   = useState("");
 
-  const isReviewed = vessel?.analysisStatus === "REVIEWED";
-  const isConfirmedNormal = vessel?.analysisStatus === "NORMAL" && vessel?.reviewedAt;
-  const needsReview = ["WARNING", "CRITICAL"].includes(vessel?.analysisStatus);
-  const canSendMail = isReviewed || isConfirmedNormal || needsReview;
+  const isReviewed = vessel?.reviewed === true || vessel?.analysisStatus === "REVIEWED";
+  const canSendMail = !!vessel?.analysisResult || isReviewed;
 
   async function handleGenerateAi() {
     if (!analysisResult) { setAiError("먼저 PDF 분석을 완료해주세요."); return; }
@@ -43,13 +41,22 @@ export default function RemarkPanel({ vessel, analysisResult, accessToken, onUpd
   }
 
   function handleMarkReviewed() {
-    // NORMAL 선박은 이상없음 유지, CRITICAL/WARNING만 REVIEWED로 전환
-    const current = vessel?.analysisStatus;
-    const newStatus = current === "NORMAL" ? "NORMAL" : "REVIEWED";
+    // AI 판정 유지 + 검토완료 플래그만 추가
     onUpdate?.({
       reviewNote: note,
       reviewRemark: remark,
-      analysisStatus: newStatus,
+      reviewed: true,
+      reviewedAt: new Date().toISOString(),
+    });
+  }
+
+  function handleNormalOverride() {
+    // 정상확인: AI 판정과 무관하게 이상없음으로 오버라이드
+    onUpdate?.({
+      reviewNote: note,
+      reviewRemark: remark,
+      reviewed: true,
+      analysisStatus: "NORMAL",
       reviewedAt: new Date().toISOString(),
     });
   }
@@ -79,17 +86,7 @@ export default function RemarkPanel({ vessel, analysisResult, accessToken, onUpd
         {isReviewed && (
           <span className="text-xs bg-indigo-100 text-indigo-700 border border-indigo-200 px-2.5 py-1 rounded-full font-medium">
             ✓ 검토완료
-            {vessel.reviewedAt && (
-              <span className="ml-1 opacity-70">
-                {new Date(vessel.reviewedAt).toLocaleDateString("ko-KR")}
-              </span>
-            )}
-          </span>
-        )}
-        {isConfirmedNormal && (
-          <span className="text-xs bg-green-100 text-green-700 border border-green-200 px-2.5 py-1 rounded-full font-medium">
-            ✅ 정상 확인
-            {vessel.reviewedAt && (
+            {vessel?.reviewedAt && (
               <span className="ml-1 opacity-70">
                 {new Date(vessel.reviewedAt).toLocaleDateString("ko-KR")}
               </span>
@@ -127,13 +124,23 @@ export default function RemarkPanel({ vessel, analysisResult, accessToken, onUpd
             <><span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" />AI 생성중...</>
           ) : "🤖 AI 리마크 생성"}
         </button>
-        {!isReviewed && !isConfirmedNormal && analysisResult && (
-          <button
-            onClick={handleMarkReviewed}
-            className="px-4 py-2 text-sm text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors"
-          >
-            ✓ 검토 완료
-          </button>
+        {!isReviewed && analysisResult && (
+          <>
+            <button
+              onClick={handleMarkReviewed}
+              className="px-4 py-2 text-sm text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors"
+            >
+              ✓ 검토 완료
+            </button>
+            {["CRITICAL", "WARNING"].includes(vessel?.analysisStatus) && (
+              <button
+                onClick={handleNormalOverride}
+                className="px-4 py-2 text-sm text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors"
+              >
+                ✅ 정상 확인
+              </button>
+            )}
+          </>
         )}
       </div>
 
