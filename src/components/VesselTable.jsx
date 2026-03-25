@@ -72,14 +72,14 @@ function IssueSummary({ vessel }) {
 
 const STATUS_CONFIG = {
   CRITICAL: {
-    label: "즉시확인필요",
+    label: "이상",
     dot: "bg-red-500",
     cls: "bg-red-50 text-red-700 border-red-200",
     rowHover: "hover:bg-red-50/60",
     rowBorder: "border-l-red-400",
   },
   WARNING: {
-    label: "검토필요",
+    label: "주의",
     dot: "bg-amber-400",
     cls: "bg-amber-50 text-amber-700 border-amber-200",
     rowHover: "hover:bg-amber-50/60",

@@ -2,7 +2,7 @@
 const CARD_DEFS = [
   {
     key: "CRITICAL",
-    label: "즉시확인필요",
+    label: "이상",
     icon: "emergency_home",
     emphasized: true,
     numCls: "text-slate-800",
@@ -14,7 +14,7 @@ const CARD_DEFS = [
   },
   {
     key: "WARNING",
-    label: "검토필요",
+    label: "주의",
     icon: "warning",
     numCls: "text-slate-800",
     iconBg: "bg-amber-100 text-amber-600",
