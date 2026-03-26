@@ -13,7 +13,7 @@ const VESSEL_COLS = ["id", "name", "vesselCode", "imoNumber", "manufacturer", "m
 /** Sheet1 A2:H 전체 읽기 → Vessel[] */
 export async function readVessels(sheetId, accessToken) {
   const range = encodeURIComponent("Vessels!A2:H");
-  const res = await fetch(`${BASE}/${sheetId}/values/${range}`, {
+  const res = await fetch(`${BASE}/${sheetId}/values/${range}?valueRenderOption=UNFORMATTED_VALUE`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   if (!res.ok) throw new Error(`Sheets readVessels: ${res.status}`);
@@ -23,9 +23,11 @@ export async function readVessels(sheetId, accessToken) {
   let needWriteBack = false;
   const vessels = rows
     .filter((r) => r.some((cell) => cell)) // 완전히 빈 행 skip
-    .map((r) => {
+    .map((rawRow) => {
+      // 행 길이 보장 (trailing empty cells 누락 방지)
+      const r = [...rawRow, ...Array(VESSEL_COLS.length).fill("")].slice(0, VESSEL_COLS.length);
       const obj = {};
-      VESSEL_COLS.forEach((col, i) => { obj[col] = r[i] || ""; });
+      VESSEL_COLS.forEach((col, i) => { obj[col] = String(r[i] ?? ""); });
       // A열(id)이 비어있으면 자동 생성
       if (!obj.id) {
         obj.id = `vessel_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -72,7 +74,7 @@ const MONTHLY_COLS = ["vesselId", "year", "month", "analysisStatus", "analysisEr
 /** Sheet2 전체 읽기 → 해당 년/월 선박별 Map { [vesselId]: entry } */
 export async function readMonthlyData(sheetId, year, month, accessToken) {
   const range = encodeURIComponent("MonthlyData!A2:H");
-  const res = await fetch(`${BASE}/${sheetId}/values/${range}`, {
+  const res = await fetch(`${BASE}/${sheetId}/values/${range}?valueRenderOption=UNFORMATTED_VALUE`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   if (!res.ok) throw new Error(`Sheets readMonthlyData: ${res.status}`);
@@ -80,10 +82,12 @@ export async function readMonthlyData(sheetId, year, month, accessToken) {
   const rows = json.values || [];
 
   const result = {};
-  for (const r of rows) {
-    const vesselId = r[0];
-    const rowYear  = r[1];
-    const rowMonth = r[2];
+  for (const rawRow of rows) {
+    // 행 길이 보장 (trailing empty cells 누락 방지)
+    const r = [...rawRow, ...Array(MONTHLY_COLS.length).fill("")].slice(0, MONTHLY_COLS.length);
+    const vesselId = String(r[0] ?? "");
+    const rowYear  = String(r[1] ?? "");
+    const rowMonth = String(r[2] ?? "");
     if (!vesselId || rowYear !== String(year) || rowMonth !== String(month)) continue;
 
     let analysisResult = null;
@@ -113,7 +117,7 @@ export async function readMonthlyData(sheetId, year, month, accessToken) {
 export async function upsertMonthlyEntry(sheetId, vesselId, year, month, entry, accessToken) {
   // 1. 전체 읽어서 해당 행 찾기
   const range = encodeURIComponent("MonthlyData!A2:H");
-  const readRes = await fetch(`${BASE}/${sheetId}/values/${range}`, {
+  const readRes = await fetch(`${BASE}/${sheetId}/values/${range}?valueRenderOption=UNFORMATTED_VALUE`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   if (!readRes.ok) throw new Error(`Sheets upsert read: ${readRes.status}`);
@@ -154,14 +158,17 @@ export async function upsertMonthlyEntry(sheetId, vesselId, year, month, entry, 
     resultJson,
   ];
 
-  // 행 인덱스 찾기 (0-based, 헤더 제외 → 실제 시트 행 = index + 2)
-  const rowIndex = rows.findIndex(
-    (r) => r[0] === vesselId && r[1] === String(year) && r[2] === String(month)
+  // 빈 행 제외하고 실제 시트 행 번호를 직접 추적 (빈 행 끼면 rowIndex+2 오계산 방지)
+  const dataRows = rows
+    .map((r, i) => ({ r, sheetRow: i + 2 }))
+    .filter(({ r }) => r.length > 0 && r[0]);
+  const match = dataRows.find(
+    ({ r }) => String(r[0]) === vesselId && String(r[1]) === String(year) && String(r[2]) === String(month)
   );
 
-  if (rowIndex >= 0) {
+  if (match) {
     // 기존 행 update
-    const sheetRow = rowIndex + 2; // A2부터 시작
+    const sheetRow = match.sheetRow;
     const updateRange = encodeURIComponent(`MonthlyData!A${sheetRow}:H${sheetRow}`);
     await fetch(`${BASE}/${sheetId}/values/${updateRange}?valueInputOption=RAW`, {
       method: "PUT",
@@ -205,7 +212,7 @@ export async function getSheetNameByGid(spreadsheetId, gid, accessToken) {
 export async function readCalibration(spreadsheetId, sheetName, accessToken) {
   const range = encodeURIComponent(`${sheetName}!A1:D23`);
   const res = await fetch(
-    `${BASE}/${spreadsheetId}/values/${range}`,
+    `${BASE}/${spreadsheetId}/values/${range}?valueRenderOption=UNFORMATTED_VALUE`,
     { headers: { Authorization: `Bearer ${accessToken}` } }
   );
   if (!res.ok) throw new Error(`readCalibration: ${res.status}`);
@@ -244,7 +251,7 @@ export async function updateCalibCell(spreadsheetId, sheetName, rowIndex, col, v
  */
 export async function clearMonthlyData(sheetId, year, month, accessToken) {
   const range = encodeURIComponent("MonthlyData!A2:H");
-  const readRes = await fetch(`${BASE}/${sheetId}/values/${range}`, {
+  const readRes = await fetch(`${BASE}/${sheetId}/values/${range}?valueRenderOption=UNFORMATTED_VALUE`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   if (!readRes.ok) return; // 실패해도 조용히 무시
@@ -255,7 +262,7 @@ export async function clearMonthlyData(sheetId, year, month, accessToken) {
   // batchUpdate로 해당 년/월 행을 빈 값으로 덮어씀
   const requests = [];
   rows.forEach((r, i) => {
-    if (r[1] === String(year) && r[2] === String(month)) {
+    if (String(r[1] ?? "") === String(year) && String(r[2] ?? "") === String(month)) {
       const sheetRow = i + 2;
       requests.push({
         range: `MonthlyData!A${sheetRow}:H${sheetRow}`,

@@ -124,10 +124,10 @@ export default function VesselDetail({ vessel, onClose, isAdmin }) {
           )}
         </div>
         <div className="flex items-center gap-2">
-          {isAdmin && r && (
+          {r && r._debug && (
             <button
               onClick={() => setShowDebug(p => !p)}
-              title="파싱 진단 (관리자 전용)"
+              title="파싱 진단"
               className={`text-xs px-2 py-0.5 rounded border font-mono transition-colors
                 ${showDebug
                   ? "bg-slate-700 text-white border-slate-600"
@@ -154,7 +154,7 @@ export default function VesselDetail({ vessel, onClose, isAdmin }) {
       )}
 
       {/* 🔍 진단 패널 (관리자 전용) */}
-      {isAdmin && showDebug && r && (() => {
+      {showDebug && r && r._debug && (() => {
         const dbg = r._debug || {};
         const s0Tro = dbg.stage0RawTro;
         const aiTro = dbg.aiTroData;
