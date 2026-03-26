@@ -1545,8 +1545,8 @@ export async function analyzePdfFromDrive(files, accessToken, vessel = {}) {
         if (!exists) {
           alarms.push({
             code:        'VRCS_ERR',
-            description: `Valve Opened/Closed 반복 오작동 감지 [${valve}]`,
-            level:       'Warning',
+            description: `Valve Opened/Closed 반복 오작동 감지 [${valve}] ×${count}회`,
+            level:       count >= 100 ? 'Alarm' : 'Warning',
             date:        null,
             time:        null,
             count:       count,
