@@ -43,7 +43,7 @@ jobs:
             ADMIN_EMAIL: "${{ secrets.ADMIN_EMAIL }}",
             SHEETS_ID: "${{ secrets.SHEETS_ID }}",
           };
-          export { INITIAL_VESSELS, STATUS_CONFIG, mapOverallStatus } from "./config.static.js";
+          export { INITIAL_VESSELS, STATUS_CONFIG, mapOverallStatus, CALIB_CONFIG } from "./config.static.js";
           EOF
 
       - name: Build
