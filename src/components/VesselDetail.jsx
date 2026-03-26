@@ -172,6 +172,11 @@ export default function VesselDetail({ vessel, onClose, isAdmin }) {
                     <DbgRow label="Event Log 시작"           value={dbg.sections?.event_log_start ?? "null"} />
                     <DbgRow label="Op Time 시작"             value={dbg.sections?.op_time_start   ?? "null"} />
                     <DbgRow label="Data Log 시작"            value={dbg.sections?.data_log_start  ?? "null"} />
+                    {dbg.headerText && (
+                      <div style={{ marginTop: 6, padding: "6px 8px", background: "#f8f8f8", borderRadius: 4, fontSize: 10, fontFamily: "monospace", whiteSpace: "pre-wrap", maxHeight: 160, overflowY: "auto", color: "#333", border: "1px solid #ddd" }}>
+                        {dbg.headerText}
+                      </div>
+                    )}
                   </>
               }
             </DbgSection>

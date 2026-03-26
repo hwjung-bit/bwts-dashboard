@@ -1110,7 +1110,7 @@ async function extractTotalLogText(blob) {
   }
 
   await pdfDoc.destroy();
-  return { text: textParts.join("\n"), totalPages: total, sections, stage0, isTotalReport };
+  return { text: textParts.join("\n"), totalPages: total, sections, stage0, isTotalReport, headerText: headerText.slice(0, 800) };
 }
 
 // ── 대용량 PDF 분할 (pdf-lib 동적 import) ────────────────────
@@ -1482,6 +1482,7 @@ export async function analyzePdfFromDrive(files, accessToken, vessel = {}) {
     totalPages:    totalLogExtraction.totalPages,
     isTotalReport: totalLogExtraction.isTotalReport ?? false,
     sections:      totalLogExtraction.sections,
+    headerText:    totalLogExtraction.headerText ?? null,
     stage0RawTro:  totalLogExtraction.stage0?.tro_data ?? null,
     aiTroData:     _aiTroSnapshot,
   } : {
