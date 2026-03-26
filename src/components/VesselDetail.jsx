@@ -164,11 +164,16 @@ export default function VesselDetail({ vessel, onClose, isAdmin }) {
 
             {/* 1. PDF 구조 */}
             <DbgSection title="📄 PDF 구조">
-              <DbgRow label="전체 페이지"              value={dbg.totalPages ?? "알 수 없음"} />
-              <DbgRow label="Total Report (+1 offset)" value={dbg.isTotalReport ? "✅ 감지됨" : (dbg.totalPages ? "❌ 미감지" : "⚠ _debug 없음 — 재분석 필요")} />
-              <DbgRow label="Event Log 시작"           value={dbg.sections?.event_log_start ?? "null"} />
-              <DbgRow label="Op Time 시작"             value={dbg.sections?.op_time_start   ?? "null"} />
-              <DbgRow label="Data Log 시작"            value={dbg.sections?.data_log_start  ?? "null"} />
+              {dbg.totalLogFailed
+                ? <DbgErr msg={`pdf.js 추출 실패 → 일반 Gemini 경로 사용: ${dbg.totalLogError}`} />
+                : <>
+                    <DbgRow label="전체 페이지"              value={dbg.totalPages ?? "알 수 없음 (재분석 필요)"} />
+                    <DbgRow label="Total Report (+1 offset)" value={dbg.isTotalReport ? "✅ 감지됨" : "❌ 미감지"} />
+                    <DbgRow label="Event Log 시작"           value={dbg.sections?.event_log_start ?? "null"} />
+                    <DbgRow label="Op Time 시작"             value={dbg.sections?.op_time_start   ?? "null"} />
+                    <DbgRow label="Data Log 시작"            value={dbg.sections?.data_log_start  ?? "null"} />
+                  </>
+              }
             </DbgSection>
 
             {/* 2. Stage 0 결과 (logParser) */}

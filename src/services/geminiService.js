@@ -1331,6 +1331,7 @@ export async function analyzePdfFromDrive(files, accessToken, vessel = {}) {
   const preloadedBlobs = new Map(); // fileId → blob (재다운로드 방지)
   let totalLogExtraction = null;   // TOTAL LOG 텍스트 추출 결과
   let totalLogFileId     = null;
+  let totalLogError      = null;   // extractTotalLogText 실패 시 에러 메시지
 
   for (const id of ids) {
     const cached = _fileUriCache.get(id);
@@ -1347,6 +1348,7 @@ export async function analyzePdfFromDrive(files, accessToken, vessel = {}) {
         totalLogExtraction = await extractTotalLogText(blob);
         totalLogFileId     = id;
       } catch (e) {
+        totalLogError = e.message;
         console.warn("[TOTAL LOG] pdf.js 추출 실패, 일반 경로 fallback:", e.message);
         preloadedBlobs.set(id, blob);
       }
@@ -1473,18 +1475,17 @@ export async function analyzePdfFromDrive(files, accessToken, vessel = {}) {
     }
   }
 
-  // 진단 패널용 _debug 조립 (관리자 전용 표시 — validateAndNormalizeResult에서 무시됨)
-  if (totalLogExtraction) {
-    extracted._debug = {
-      totalPages:    totalLogExtraction.totalPages,
-      isTotalReport: totalLogExtraction.isTotalReport ?? false,
-      sections:      totalLogExtraction.sections,
-      stage0:        totalLogExtraction.stage0?._debug ?? null,
-      stage0RawTro:  totalLogExtraction.stage0?.tro_data ?? null,
-      aiTroData:     _aiTroSnapshot,
-      mergedTroData: extracted.tro_data ? { ...extracted.tro_data } : null,
-    };
-  }
+  // 진단 패널용 _debug 조립 (관리자 전용 표시 — 항상 기록)
+  extracted._debug = totalLogExtraction ? {
+    totalPages:    totalLogExtraction.totalPages,
+    isTotalReport: totalLogExtraction.isTotalReport ?? false,
+    sections:      totalLogExtraction.sections,
+    stage0RawTro:  totalLogExtraction.stage0?.tro_data ?? null,
+    aiTroData:     _aiTroSnapshot,
+  } : {
+    totalLogFailed: true,
+    totalLogError:  totalLogError ?? "알 수 없는 오류",
+  };
 
   // Stage 2: 분析/판정/remarks (JSON만, PDF 없음)
   const analysisParts = [{ text: ANALYSIS_PROMPT(vessel, extracted) }];
