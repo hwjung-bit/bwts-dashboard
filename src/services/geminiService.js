@@ -1439,7 +1439,12 @@ export async function analyzePdfFromDrive(files, accessToken, vessel = {}) {
     }
     if (s0.tro_data !== null) {
       console.log('[Stage0 Override] tro_data:', JSON.stringify(s0.tro_data));
-      extracted.tro_data = { ...(extracted.tro_data || {}), ...s0.tro_data };
+      // Stage 0의 null 필드는 AI 유효값을 덮어쓰지 않음 (null override 방지)
+      const s0NonNull = Object.fromEntries(
+        Object.entries(s0.tro_data).filter(([, v]) => v !== null)
+      );
+      extracted.tro_data = { ...(extracted.tro_data || {}), ...s0NonNull };
+      console.log('[Stage0 Override] tro_data (merged):', JSON.stringify(extracted.tro_data));
     }
     // Stage 0 VRCS override
     if (s0.vrcs_data && s0.vrcs_data.length > 0) {
