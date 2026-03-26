@@ -98,3 +98,10 @@ export function mapOverallStatus(status, alarms = []) {
   if (alarms && alarms.length === 0)                         return "NORMAL";
   return "NO_DATA";
 }
+
+// ── 검교정 이력 설정 (비민감 — GitHub 커밋 OK) ─────────────
+export const CALIB_CONFIG = {
+  SHEET_ID:       "1Kv7dIhAs_QfvccAxjGev-EutU_VtgOm4TQclDB72Y6A",
+  GID:            297341548,
+  STATUS_OPTIONS: ["", "진행 예정", "확인필요", "업체요청필요"],
+};

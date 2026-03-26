@@ -179,6 +179,65 @@ export async function upsertMonthlyEntry(sheetId, vesselId, year, month, entry, 
   }
 }
 
+// ── Calibration History (외부 시트) ──────────────────────────
+
+/**
+ * GID로 시트 탭명 조회
+ * @returns {Promise<string|null>} 탭명 (e.g. "BWTS 검교정")
+ */
+export async function getSheetNameByGid(spreadsheetId, gid, accessToken) {
+  const res = await fetch(
+    `${BASE}/${spreadsheetId}?fields=sheets.properties`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  if (!res.ok) throw new Error(`getSheetNameByGid: ${res.status}`);
+  const json = await res.json();
+  const sheet = (json.sheets || []).find(
+    (s) => s.properties.sheetId === Number(gid)
+  );
+  return sheet?.properties?.title ?? null;
+}
+
+/**
+ * 검교정 데이터 읽기 (행3~23 = 데이터, 행1~2 = 헤더)
+ * @returns {Promise<Array<{rowIndex,vesselCode,note,date,status}>>}
+ */
+export async function readCalibration(spreadsheetId, sheetName, accessToken) {
+  const range = encodeURIComponent(`${sheetName}!A1:D23`);
+  const res = await fetch(
+    `${BASE}/${spreadsheetId}/values/${range}`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  if (!res.ok) throw new Error(`readCalibration: ${res.status}`);
+  const json = await res.json();
+  const rows = json.values || [];
+  // 헤더 2행 skip → index 2 이후가 데이터
+  return rows.slice(2).map((r, i) => ({
+    rowIndex:   i + 3,       // 시트 1-based 행 번호
+    vesselCode: r[0] || "",
+    note:       r[1] || "",
+    date:       r[2] || "",
+    status:     r[3] || "",
+  }));
+}
+
+/**
+ * 단일 셀 업데이트
+ * @param {string} col - 'B'(특이사항) | 'C'(날짜) | 'D'(진행상황)
+ */
+export async function updateCalibCell(spreadsheetId, sheetName, rowIndex, col, value, accessToken) {
+  const range = encodeURIComponent(`${sheetName}!${col}${rowIndex}`);
+  const res = await fetch(
+    `${BASE}/${spreadsheetId}/values/${range}?valueInputOption=USER_ENTERED`,
+    {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ values: [[value]] }),
+    }
+  );
+  if (!res.ok) throw new Error(`updateCalibCell: ${res.status}`);
+}
+
 /**
  * 특정 년/월의 MonthlyData 행 전체를 NO_DATA로 초기화
  * (Sheets API는 행 삭제가 복잡하므로 내용만 비움)

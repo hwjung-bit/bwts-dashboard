@@ -4,6 +4,7 @@ import { readVessels, writeVessels } from "./services/sheetsService.js";
 import Dashboard from "./components/Dashboard.jsx";
 import VesselManager from "./components/VesselManager.jsx";
 import ShipLogs from "./components/ShipLogs.jsx";
+import CalibrationView from "./components/CalibrationView.jsx";
 
 async function fetchUserEmail(accessToken) {
   const res = await fetch(`https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${accessToken}`);
@@ -191,6 +192,17 @@ export default function App() {
               <span className="material-symbols-outlined" style={{ fontSize: 18 }}>sailing</span>
               Ship Logs
             </button>
+            <button
+              onClick={() => setActiveView("calibration")}
+              className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors text-left ${
+                activeView === "calibration"
+                  ? "bg-white text-[#003c69] shadow-sm font-semibold"
+                  : "text-slate-500 hover:text-[#003c69] hover:bg-white/70"
+              }`}
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>build_circle</span>
+              Calibration History
+            </button>
             <div className="flex items-center gap-3 px-4 py-2.5 text-slate-300 rounded-xl text-sm font-medium cursor-not-allowed">
               <span className="material-symbols-outlined" style={{ fontSize: 18 }}>assessment</span>
               Reports
@@ -296,6 +308,8 @@ export default function App() {
           ) : accessToken ? (
             activeView === "shiplogs" ? (
               <ShipLogs vessels={vessels} />
+            ) : activeView === "calibration" ? (
+              <CalibrationView accessToken={accessToken} />
             ) : (
               <Dashboard
                 vessels={vessels}
