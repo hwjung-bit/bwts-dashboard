@@ -1,5 +1,30 @@
 // VesselDetail - 선박 상세 패널 (라이트 테마)
+import { useState } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
+
+// ── 진단 패널 헬퍼 컴포넌트 (관리자 전용) ─────────────────────
+function DbgSection({ title, children }) {
+  return (
+    <div className="mb-3">
+      <div className="text-slate-400 text-[11px] mb-1 font-semibold">{title}</div>
+      <div className="pl-2 space-y-0.5">{children}</div>
+    </div>
+  );
+}
+function DbgRow({ label, value, highlight }) {
+  return (
+    <div className="flex gap-2 leading-snug">
+      <span className="text-slate-500 w-40 shrink-0 text-[11px]">{label}</span>
+      <span className={`break-all text-[11px] ${highlight ? "text-green-400 font-semibold" : "text-slate-200"}`}>
+        {value ?? "null"}
+      </span>
+    </div>
+  );
+}
+function DbgErr({ msg }) {
+  return <div className="text-red-400 text-[11px]">⚠ {msg}</div>;
+}
+// ─────────────────────────────────────────────────────────────
 
 const STATUS_STYLE = {
   NORMAL:   { dot: "bg-green-500",  badge: "bg-green-100 text-green-700",     label: "정상",    bg: "bg-green-50 border-green-200"   },
@@ -69,9 +94,10 @@ function AlarmTag({ alarm }) {
   );
 }
 
-export default function VesselDetail({ vessel, onClose }) {
+export default function VesselDetail({ vessel, onClose, isAdmin }) {
   if (!vessel) return null;
 
+  const [showDebug, setShowDebug] = useState(false);
   const r = vessel.analysisResult;
   const s = STATUS_STYLE[vessel.analysisStatus] || STATUS_STYLE.NO_DATA;
   const sensor = r?.sensor_data || {};
@@ -97,7 +123,21 @@ export default function VesselDetail({ vessel, onClose }) {
             <span className="text-xs text-slate-400 bg-white border border-slate-200 px-2 py-0.5 rounded-full">{r.manufacturer}</span>
           )}
         </div>
-        <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl leading-none">✕</button>
+        <div className="flex items-center gap-2">
+          {isAdmin && r?._debug && (
+            <button
+              onClick={() => setShowDebug(p => !p)}
+              title="파싱 진단 (관리자 전용)"
+              className={`text-xs px-2 py-0.5 rounded border font-mono transition-colors
+                ${showDebug
+                  ? "bg-slate-700 text-white border-slate-600"
+                  : "bg-white text-slate-400 border-slate-300 hover:bg-slate-50"}`}
+            >
+              🔍 진단
+            </button>
+          )}
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl leading-none">✕</button>
+        </div>
       </div>
 
       {/* 분석 오류 배너 */}
@@ -112,6 +152,71 @@ export default function VesselDetail({ vessel, onClose }) {
           </p>
         </div>
       )}
+
+      {/* 🔍 진단 패널 (관리자 전용) */}
+      {isAdmin && showDebug && r?._debug && (() => {
+        const dbg = r._debug;
+        return (
+          <div className="mx-5 mt-4 bg-slate-900 text-slate-200 rounded-xl p-4 text-xs font-mono overflow-auto max-h-[60vh]">
+            <div className="text-slate-500 mb-3 text-[11px] select-none">── 파싱 진단 (관리자 전용) ──────────────────────</div>
+
+            {/* 1. PDF 구조 */}
+            <DbgSection title="📄 PDF 구조">
+              <DbgRow label="전체 페이지"          value={dbg.totalPages} />
+              <DbgRow label="Total Report (+1 offset)" value={dbg.isTotalReport ? "✅ 감지됨" : "❌ 미감지"} />
+              <DbgRow label="Event Log 시작"       value={dbg.sections?.event_log_start ?? "null"} />
+              <DbgRow label="Op Time 시작"          value={dbg.sections?.op_time_start   ?? "null"} />
+              <DbgRow label="Data Log 시작"         value={dbg.sections?.data_log_start  ?? "null"} />
+            </DbgSection>
+
+            {/* 2. Stage 0 — Op Time */}
+            <DbgSection title="⏱ Stage 0 — Op Time Log">
+              {dbg.stage0?.opTime?.error
+                ? <DbgErr msg={dbg.stage0.opTime.error} />
+                : <>
+                    <DbgRow label="헤더 컬럼"   value={dbg.stage0?.opTime?.colsFound?.join(" | ")} />
+                    <DbgRow label="추출 운전 수" value={dbg.stage0?.opTime?.opCount ?? "null"} />
+                  </>
+              }
+            </DbgSection>
+
+            {/* 3. Stage 0 — Data Log */}
+            <DbgSection title="📊 Stage 0 — Data Log">
+              {dbg.stage0?.dataLog?.error
+                ? <DbgErr msg={dbg.stage0.dataLog.error} />
+                : <>
+                    <DbgRow label="헤더 컬럼"         value={dbg.stage0?.dataLog?.colsFound?.join(" | ")} />
+                    <DbgRow label="TRO-B 컬럼"        value={dbg.stage0?.dataLog?.troBCols?.join(", ") || "없음"} />
+                    <DbgRow label="TRO-D 컬럼"        value={dbg.stage0?.dataLog?.troDCols?.join(", ") || "없음"} />
+                    <DbgRow label="OPERATION 값"      value={dbg.stage0?.dataLog?.opNamesFound?.join(", ")} />
+                    <DbgRow label="전체행 / Ballast행" value={`${dbg.stage0?.dataLog?.totalRows ?? "?"} / ${dbg.stage0?.dataLog?.ballastRowCount ?? "?"}`} />
+                    <DbgRow label="유효 TRO-B (최대20)" value={
+                      dbg.stage0?.dataLog?.ballastTROSample?.length
+                        ? dbg.stage0.dataLog.ballastTROSample.join(", ")
+                        : "없음"
+                    } />
+                  </>
+              }
+            </DbgSection>
+
+            {/* 4. TRO 비교 */}
+            <DbgSection title="🔬 TRO 추출 비교">
+              <DbgRow label="AI 추출 (Stage 1)"   value={JSON.stringify(dbg.aiTroData)} />
+              <DbgRow label="Stage 0 원본"         value={JSON.stringify(dbg.stage0RawTro)} />
+              <DbgRow label="병합 결과 (최종)"     value={JSON.stringify(dbg.mergedTroData)} highlight />
+            </DbgSection>
+
+            {/* 5. VRCS */}
+            {dbg.stage0?.vrcs?.length > 0 && (
+              <DbgSection title="🔧 VRCS 채터링 감지">
+                {dbg.stage0.vrcs.map((v, i) => (
+                  <DbgRow key={i} label={v.valve} value={`${v.count}회`} />
+                ))}
+              </DbgSection>
+            )}
+          </div>
+        );
+      })()}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 p-5">
         {/* 좌측 */}

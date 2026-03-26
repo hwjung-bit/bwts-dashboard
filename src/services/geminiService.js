@@ -1023,9 +1023,10 @@ async function extractTotalLogText(blob) {
   // ── Total Report 감지 ─────────────────────────────────────
   // Total Report(통합 PDF)는 첫 페이지가 Report List 인덱스 페이지.
   // ECS 시스템이 자기 페이지를 번호에 포함하지 않아 section 번호가 +1 오프셋 발생.
-  if (/Report\s+List/i.test(headerText) &&
+  const isTotalReport = /Report\s+List/i.test(headerText) &&
       sections.event_log_start != null &&
-      sections.op_time_start   != null) {
+      sections.op_time_start   != null;
+  if (isTotalReport) {
     console.log('[pdf.js] Total Report 감지 — section 페이지 +1 offset 적용');
     if (sections.event_log_start != null) sections.event_log_start += 1;
     if (sections.op_time_start   != null) sections.op_time_start   += 1;
@@ -1107,7 +1108,7 @@ async function extractTotalLogText(blob) {
   }
 
   await pdfDoc.destroy();
-  return { text: textParts.join("\n"), totalPages: total, sections, stage0 };
+  return { text: textParts.join("\n"), totalPages: total, sections, stage0, isTotalReport };
 }
 
 // ── 대용량 PDF 분할 (pdf-lib 동적 import) ────────────────────
@@ -1431,6 +1432,9 @@ export async function analyzePdfFromDrive(files, accessToken, vessel = {}) {
   }
 
   // Stage 0 오버라이드 (프로그래밍 파싱이 AI보다 정확)
+  // AI 추출 결과 스냅샷 (진단 패널용 — 병합 전 보존)
+  const _aiTroSnapshot = extracted.tro_data ? { ...extracted.tro_data } : null;
+
   if (totalLogExtraction?.stage0) {
     const s0 = totalLogExtraction.stage0;
     if (s0.operations !== null) {
@@ -1467,6 +1471,19 @@ export async function analyzePdfFromDrive(files, accessToken, vessel = {}) {
       }
       extracted.error_alarms = alarms;
     }
+  }
+
+  // 진단 패널용 _debug 조립 (관리자 전용 표시 — validateAndNormalizeResult에서 무시됨)
+  if (totalLogExtraction) {
+    extracted._debug = {
+      totalPages:    totalLogExtraction.totalPages,
+      isTotalReport: totalLogExtraction.isTotalReport ?? false,
+      sections:      totalLogExtraction.sections,
+      stage0:        totalLogExtraction.stage0?._debug ?? null,
+      stage0RawTro:  totalLogExtraction.stage0?.tro_data ?? null,
+      aiTroData:     _aiTroSnapshot,
+      mergedTroData: extracted.tro_data ? { ...extracted.tro_data } : null,
+    };
   }
 
   // Stage 2: 분析/판정/remarks (JSON만, PDF 없음)

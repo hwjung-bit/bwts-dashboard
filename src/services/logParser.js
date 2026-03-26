@@ -94,13 +94,17 @@ function isDataLogHeader(row) {
     (text.includes('TRO') || text.includes('REC'));
 }
 
-export function parseDataLog(rows) {
+export function parseDataLog(rows, debug = null) {
   // 1. 헤더 행 탐색 (첫 번째만 사용)
   let hIdx = -1;
   for (let i = 0; i < rows.length; i++) {
     if (isDataLogHeader(rows[i])) { hIdx = i; break; }
   }
-  if (hIdx < 0) { console.warn('[Stage0/DataLog] Header not found'); return null; }
+  if (hIdx < 0) {
+    console.warn('[Stage0/DataLog] Header not found');
+    if (debug) debug.dataLog = { error: 'Header not found' };
+    return null;
+  }
 
   const headerRow = rows[hIdx];
   const colNames  = headerRow.cells.map(c => c.str.trim().toUpperCase());
@@ -117,7 +121,14 @@ export function parseDataLog(rows) {
   const fmuName   = colNames.find(n => /^FMU\d*$/.test(n) && !n.includes('_ST')) ?? null;
   const anuName   = colNames.find(n => /^ANU_D\d*$|^ANU_S\d*$/.test(n)) ?? null;
 
-  if (!colNames.includes(opName)) { console.warn('[Stage0/DataLog] No OPERATION col'); return null; }
+  if (!colNames.includes(opName)) {
+    console.warn('[Stage0/DataLog] No OPERATION col');
+    if (debug) debug.dataLog = { error: 'OPERATION column not found', colsFound: colNames };
+    return null;
+  }
+
+  // debug: 컬럼 정보 기록
+  if (debug) debug.dataLog = { colsFound: colNames, troBCols: troBNames, troDCols: troDNames };
 
   // 3. 데이터 행 파싱
   const ballastTROs   = [];
@@ -126,6 +137,8 @@ export function parseDataLog(rows) {
   const fmuValues     = [];
   let anuOp = 0, anuAll = 0;
   let counted = 0;
+  let ballastRowCount = 0;       // debug: 전체 ballast 행 수 (TRO 범위 무관)
+  const opNamesSet = new Set();  // debug: 실제 OPERATION 컬럼 값 수집
   let seenHeaders = 0; // 페이지마다 헤더 반복 → 스킵용
 
   for (let i = hIdx + 1; i < rows.length; i++) {
@@ -146,6 +159,8 @@ export function parseDataLog(rows) {
     const isStripping = op === 'STRIPPING' || op === 'N-S' || /^\d+-?S$/i.test(op);
     if (!isBallast && !isDeballast && !isStripping) continue;
     counted++;
+    if (isBallast) ballastRowCount++;
+    opNamesSet.add(op);
 
     // TRO 추출
     if (isBallast) {
@@ -180,7 +195,14 @@ export function parseDataLog(rows) {
     }
   }
 
-  console.log(`[Stage0/DataLog] ${counted} op rows | B-TRO:${ballastTROs.length}건 | D-TRO:${deballastTROs.length}건 | headers repeated:${seenHeaders}`);
+  console.log(`[Stage0/DataLog] ${counted} op rows | B-rows:${ballastRowCount} | B-TRO:${ballastTROs.length}건 | D-TRO:${deballastTROs.length}건 | headers repeated:${seenHeaders}`);
+  if (debug) {
+    debug.dataLog.totalRows         = counted;
+    debug.dataLog.ballastRowCount   = ballastRowCount;
+    debug.dataLog.opNamesFound      = [...opNamesSet];
+    debug.dataLog.ballastTROSample  = ballastTROs.slice(0, 20);
+    debug.dataLog.deballastTROSample = deballastTROs.slice(0, 10);
+  }
 
   const avg = arr => arr.length ? +(arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(2) : null;
   const max = arr => arr.length ? +(Math.max(...arr)).toFixed(2) : null;
@@ -242,18 +264,23 @@ function extractDateTime(str) {
   return { date: null, time: null };
 }
 
-export function parseOpTimeLog(rows) {
+export function parseOpTimeLog(rows, debug = null) {
   // 헤더 탐색
   let hIdx = -1;
   for (let i = 0; i < rows.length; i++) {
     if (isOpTimeLogHeader(rows[i])) { hIdx = i; break; }
   }
-  if (hIdx < 0) { console.warn('[Stage0/OpTime] Header not found'); return null; }
+  if (hIdx < 0) {
+    console.warn('[Stage0/OpTime] Header not found');
+    if (debug) debug.opTime = { error: 'Header not found' };
+    return null;
+  }
 
   const headerRow = rows[hIdx];
   const colNames  = headerRow.cells.map(c => c.str.trim().toUpperCase());
   const matchCol  = buildColMatcher(headerRow);
   console.log('[Stage0/OpTime] cols:', colNames.join(' | '));
+  if (debug) debug.opTime = { colsFound: colNames };
 
   // 컬럼 키 식별
   const opKey  = colNames.find(n => n === 'OPERATION' || n === 'OP' || n === 'MODE') ?? null;
@@ -315,6 +342,7 @@ export function parseOpTimeLog(rows) {
   }
 
   console.log(`[Stage0/OpTime] ${operations.length} operations`);
+  if (debug) debug.opTime.opCount = operations.length;
   return operations;
 }
 
@@ -328,15 +356,17 @@ export async function parseEcsLogStructured(pdfDoc, sections, totalPages) {
   const total  = totalPages ?? pdfDoc.numPages;
   const opEnd  = (sections.data_log_start ?? sections.op_time_start + 15) - 1;
 
-  const result = { operations: null, tro_data: null, vrcs_data: null };
+  const _debug = {};
+  const result = { operations: null, tro_data: null, vrcs_data: null, _debug };
 
   // Op Time Log 파싱
   try {
     console.log(`[Stage0] Op Time Log: p.${sections.op_time_start}~${opEnd}`);
     const rows = await extractPagesRows(pdfDoc, sections.op_time_start, opEnd);
-    result.operations = parseOpTimeLog(rows);
+    result.operations = parseOpTimeLog(rows, _debug);
   } catch (e) {
     console.warn('[Stage0] Op Time parse failed:', e.message);
+    _debug.opTime = { error: e.message };
   }
 
   // Data Log 파싱 — 전체 페이지 (AI 컨텍스트 제한 없음!)
@@ -344,10 +374,13 @@ export async function parseEcsLogStructured(pdfDoc, sections, totalPages) {
     try {
       console.log(`[Stage0] Data Log: p.${sections.data_log_start}~${total} (ALL pages)`);
       const rows = await extractPagesRows(pdfDoc, sections.data_log_start, total);
-      result.tro_data = parseDataLog(rows);
+      result.tro_data = parseDataLog(rows, _debug);
     } catch (e) {
       console.warn('[Stage0] Data Log parse failed:', e.message);
+      _debug.dataLog = { error: e.message };
     }
+  } else {
+    _debug.dataLog = { error: 'data_log_start 섹션 미감지' };
   }
 
   // Event Log VRCS 채터링 감지 (마지막 N페이지 샘플)
@@ -360,6 +393,7 @@ export async function parseEcsLogStructured(pdfDoc, sections, totalPages) {
       const vrcs   = parseEventLogForVrcs(evRows);
       if (vrcs.length > 0) {
         result.vrcs_data = vrcs;
+        _debug.vrcs = vrcs;
         console.log('[Stage0] VRCS 감지:', vrcs.map(v => `${v.valve}×${v.count}`).join(', '));
       }
     } catch (e) {

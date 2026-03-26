@@ -525,7 +525,7 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
           {/* ── 선택된 선박 상세 + 검토 패널 ── */}
           {selectedVessel && (
             <>
-              <VesselDetail key={`detail-${selectedVessel.id}`} vessel={selectedVessel} onClose={() => setSelectedId(null)} />
+              <VesselDetail key={`detail-${selectedVessel.id}`} vessel={selectedVessel} onClose={() => setSelectedId(null)} isAdmin={isAdmin} />
               <RemarkPanel
                 key={`remark-${selectedVessel.id}`}
                 vessel={selectedVessel}
