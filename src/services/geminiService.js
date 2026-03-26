@@ -1365,86 +1365,77 @@ export async function analyzePdfFromDrive(files, accessToken, vessel = {}) {
   }
   console.log('[Files] 종류별 분류:', Object.entries(filesByType).filter(([,v])=>v.length).map(([k,v])=>`${k}:${v.length}`).join(', '));
 
-  // 분석 우선순위: Total > (Event+Data+OpTime 개별) > unknown
-  // Total이 없으면 Event Log를 메인으로 사용 (가장 큰 파일)
-  const mainFiles  = filesByType.total.length  ? filesByType.total
-                   : filesByType.event.length  ? filesByType.event
-                   : filesByType.unknown;
-  const dataFiles  = filesByType.data;
+  // 처리 순서: OpTime(소) → DataReport(중) → EventLog/Total(대, AI 메인)
   const optFiles   = filesByType.optime;
+  const dataFiles  = filesByType.data;
+  // AI 메인: Total 우선, 없으면 EventLog, 없으면 unknown
+  const mainFiles  = filesByType.total.length ? filesByType.total
+                   : filesByType.event.length ? filesByType.event
+                   : filesByType.unknown;
   const allIds     = normalizedFiles.map(f => f.id);
 
-  // ── 파일 다운로드 + TOTAL LOG 추출 ──────────────────────────
+  // ── 모든 파일 사전 다운로드 ──────────────────────────────────
   const preloadedBlobs = new Map();
+  for (const f of normalizedFiles) {
+    if (_fileUriCache.get(f.id) && Date.now() - _fileUriCache.get(f.id).uploadedAt < FILES_EXPIRE_MS) continue;
+    preloadedBlobs.set(f.id, await downloadDriveFile(f.id, accessToken));
+  }
+
+  // pdfjs 초기화 (한 번만)
+  const pdfjsLib = await import("pdfjs-dist");
+  pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+    "pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url
+  ).href;
+  const { extractPageRowsExport, parseOpTimeLog, parseDataLog } = await import('./logParser.js');
+
+  async function parsePdfAllRows(blob) {
+    const pdfDoc = await pdfjsLib.getDocument({ data: await blob.arrayBuffer() }).promise;
+    const rows = [];
+    for (let p = 1; p <= pdfDoc.numPages; p++) rows.push(...await extractPageRowsExport(pdfDoc, p));
+    await pdfDoc.destroy();
+    return rows;
+  }
+
+  // ① Operation Time → Stage 0 운전 기록
+  let optimeOps = null;
+  for (const f of optFiles) {
+    try {
+      const rows = await parsePdfAllRows(preloadedBlobs.get(f.id));
+      const ops  = parseOpTimeLog(rows);
+      if (ops?.length) { optimeOps = ops; console.log('[OpTime] ops:', ops.length, '건'); break; }
+    } catch (e) { console.warn('[OpTime] 실패:', e.message); }
+  }
+
+  // ② Data Report → Stage 0 TRO
+  let dataReportTro = null;
+  for (const f of dataFiles) {
+    try {
+      const rows = await parsePdfAllRows(preloadedBlobs.get(f.id));
+      const tro  = parseDataLog(rows);
+      if (tro) { dataReportTro = tro; console.log('[DataReport] TRO:', JSON.stringify(tro)); break; }
+    } catch (e) { console.warn('[DataReport] 실패:', e.message); }
+  }
+
+  // ③ Total / EventLog → extractTotalLogText (AI Stage 1 메인)
   let totalLogExtraction = null;
   let totalLogFileId     = null;
   let totalLogError      = null;
-
-  for (const f of [...mainFiles, ...dataFiles, ...optFiles, ...filesByType.unknown]) {
-    const id = f.id;
-    const cached = _fileUriCache.get(id);
-    if (cached && Date.now() - cached.uploadedAt < FILES_EXPIRE_MS) continue;
-
-    const blob = await downloadDriveFile(id, accessToken);
-    preloadedBlobs.set(id, blob);
-
-    if (!totalLogExtraction && mainFiles.some(mf => mf.id === id)) {
-      const { PDFDocument } = await import("pdf-lib");
-      const pageCount = (await PDFDocument.load(await blob.arrayBuffer(), { ignoreEncryption: true })).getPageCount();
-      if (pageCount > TOTAL_LOG_THRESHOLD) {
-        console.log(`[TOTAL LOG 감지] ${f.name || id}: ${pageCount}p → pdf.js 추출`);
-        try {
-          totalLogExtraction = await extractTotalLogText(blob);
-          totalLogFileId     = id;
-        } catch (e) {
-          totalLogError = e.message;
-          console.warn("[TOTAL LOG] pdf.js 실패, fallback:", e.message);
-        }
+  for (const f of mainFiles) {
+    const blob = preloadedBlobs.get(f.id);
+    if (!blob) continue;
+    const { PDFDocument } = await import("pdf-lib");
+    const pageCount = (await PDFDocument.load(await blob.arrayBuffer(), { ignoreEncryption: true })).getPageCount();
+    if (pageCount > TOTAL_LOG_THRESHOLD) {
+      console.log(`[TOTAL LOG] ${f.name || f.id}: ${pageCount}p → pdf.js 추출`);
+      try {
+        totalLogExtraction = await extractTotalLogText(blob);
+        totalLogFileId     = f.id;
+        break;
+      } catch (e) {
+        totalLogError = e.message;
+        console.warn("[TOTAL LOG] pdf.js 실패:", e.message);
       }
     }
-  }
-
-  // ── Data Report 전용 Stage 0 TRO 추출 ──────────────────────
-  // Total Log에서 TRO를 못 얻었고 별도 DataReport 파일이 있으면 직접 파싱
-  let dataReportTro = null;
-  if (dataFiles.length > 0 && (!totalLogExtraction?.stage0?.tro_data)) {
-    try {
-      const pdfjsLib = await import("pdfjs-dist");
-      pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-        "pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url
-      ).href;
-      for (const df of dataFiles) {
-        const blob = preloadedBlobs.get(df.id) || await downloadDriveFile(df.id, accessToken);
-        const pdfDoc = await pdfjsLib.getDocument({ data: await blob.arrayBuffer() }).promise;
-        const { extractPageRowsExport, parseDataLog } = await import('./logParser.js');
-        const rows = [];
-        for (let p = 1; p <= pdfDoc.numPages; p++) rows.push(...await extractPageRowsExport(pdfDoc, p));
-        const tro = parseDataLog(rows);
-        if (tro) { dataReportTro = tro; console.log('[DataReport] TRO 추출:', JSON.stringify(tro)); break; }
-        await pdfDoc.destroy();
-      }
-    } catch (e) { console.warn('[DataReport] TRO 추출 실패:', e.message); }
-  }
-
-  // ── OpTime 전용 Stage 0 운전 기록 추출 ──────────────────────
-  let optimeOps = null;
-  if (optFiles.length > 0 && !totalLogExtraction?.stage0?.operations) {
-    try {
-      const pdfjsLib = await import("pdfjs-dist");
-      pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-        "pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url
-      ).href;
-      for (const of_ of optFiles) {
-        const blob = preloadedBlobs.get(of_.id) || await downloadDriveFile(of_.id, accessToken);
-        const pdfDoc = await pdfjsLib.getDocument({ data: await blob.arrayBuffer() }).promise;
-        const { extractPageRowsExport, parseOpTimeLog } = await import('./logParser.js');
-        const rows = [];
-        for (let p = 1; p <= pdfDoc.numPages; p++) rows.push(...await extractPageRowsExport(pdfDoc, p));
-        const ops = parseOpTimeLog(rows);
-        if (ops?.length) { optimeOps = ops; console.log('[OpTime] ops 추출:', ops.length, '건'); break; }
-        await pdfDoc.destroy();
-      }
-    } catch (e) { console.warn('[OpTime] 운전기록 추출 실패:', e.message); }
   }
 
   const ids = allIds;
