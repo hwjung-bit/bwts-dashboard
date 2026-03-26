@@ -124,7 +124,7 @@ export default function VesselDetail({ vessel, onClose, isAdmin }) {
           )}
         </div>
         <div className="flex items-center gap-2">
-          {isAdmin && r?._debug && (
+          {isAdmin && r && (
             <button
               onClick={() => setShowDebug(p => !p)}
               title="파싱 진단 (관리자 전용)"
@@ -154,63 +154,61 @@ export default function VesselDetail({ vessel, onClose, isAdmin }) {
       )}
 
       {/* 🔍 진단 패널 (관리자 전용) */}
-      {isAdmin && showDebug && r?._debug && (() => {
-        const dbg = r._debug;
+      {isAdmin && showDebug && r && (() => {
+        const dbg = r._debug || {};
+        const s0Tro = dbg.stage0RawTro;
+        const aiTro = dbg.aiTroData;
         return (
           <div className="mx-5 mt-4 bg-slate-900 text-slate-200 rounded-xl p-4 text-xs font-mono overflow-auto max-h-[60vh]">
             <div className="text-slate-500 mb-3 text-[11px] select-none">── 파싱 진단 (관리자 전용) ──────────────────────</div>
 
             {/* 1. PDF 구조 */}
             <DbgSection title="📄 PDF 구조">
-              <DbgRow label="전체 페이지"          value={dbg.totalPages} />
-              <DbgRow label="Total Report (+1 offset)" value={dbg.isTotalReport ? "✅ 감지됨" : "❌ 미감지"} />
-              <DbgRow label="Event Log 시작"       value={dbg.sections?.event_log_start ?? "null"} />
-              <DbgRow label="Op Time 시작"          value={dbg.sections?.op_time_start   ?? "null"} />
-              <DbgRow label="Data Log 시작"         value={dbg.sections?.data_log_start  ?? "null"} />
+              <DbgRow label="전체 페이지"              value={dbg.totalPages ?? "알 수 없음"} />
+              <DbgRow label="Total Report (+1 offset)" value={dbg.isTotalReport ? "✅ 감지됨" : (dbg.totalPages ? "❌ 미감지" : "⚠ _debug 없음 — 재분석 필요")} />
+              <DbgRow label="Event Log 시작"           value={dbg.sections?.event_log_start ?? "null"} />
+              <DbgRow label="Op Time 시작"             value={dbg.sections?.op_time_start   ?? "null"} />
+              <DbgRow label="Data Log 시작"            value={dbg.sections?.data_log_start  ?? "null"} />
             </DbgSection>
 
-            {/* 2. Stage 0 — Op Time */}
-            <DbgSection title="⏱ Stage 0 — Op Time Log">
-              {dbg.stage0?.opTime?.error
-                ? <DbgErr msg={dbg.stage0.opTime.error} />
-                : <>
-                    <DbgRow label="헤더 컬럼"   value={dbg.stage0?.opTime?.colsFound?.join(" | ")} />
-                    <DbgRow label="추출 운전 수" value={dbg.stage0?.opTime?.opCount ?? "null"} />
-                  </>
-              }
+            {/* 2. Stage 0 결과 (logParser) */}
+            <DbgSection title="⚙ Stage 0 결과 (logParser)">
+              <DbgRow label="Stage0 tro_data"       value={JSON.stringify(s0Tro)} />
+              <DbgRow label="B-TRO (stage0)"        value={s0Tro?.ballasting_avg   ?? "null"} highlight={s0Tro?.ballasting_avg != null} />
+              <DbgRow label="D-TRO (stage0)"        value={s0Tro?.deballasting_max ?? "null"} />
+              <DbgRow label="ECU avg (stage0)"      value={s0Tro?.ecu_current_avg  ?? "null"} />
+              <DbgRow label="FMU avg (stage0)"      value={s0Tro?.fmu_flow_avg     ?? "null"} />
             </DbgSection>
 
-            {/* 3. Stage 0 — Data Log */}
-            <DbgSection title="📊 Stage 0 — Data Log">
-              {dbg.stage0?.dataLog?.error
-                ? <DbgErr msg={dbg.stage0.dataLog.error} />
-                : <>
-                    <DbgRow label="헤더 컬럼"         value={dbg.stage0?.dataLog?.colsFound?.join(" | ")} />
-                    <DbgRow label="TRO-B 컬럼"        value={dbg.stage0?.dataLog?.troBCols?.join(", ") || "없음"} />
-                    <DbgRow label="TRO-D 컬럼"        value={dbg.stage0?.dataLog?.troDCols?.join(", ") || "없음"} />
-                    <DbgRow label="OPERATION 값"      value={dbg.stage0?.dataLog?.opNamesFound?.join(", ")} />
-                    <DbgRow label="전체행 / Ballast행" value={`${dbg.stage0?.dataLog?.totalRows ?? "?"} / ${dbg.stage0?.dataLog?.ballastRowCount ?? "?"}`} />
-                    <DbgRow label="유효 TRO-B (최대20)" value={
-                      dbg.stage0?.dataLog?.ballastTROSample?.length
-                        ? dbg.stage0.dataLog.ballastTROSample.join(", ")
-                        : "없음"
-                    } />
-                  </>
-              }
+            {/* 3. AI Stage 1 결과 */}
+            <DbgSection title="🤖 AI Stage 1 결과">
+              <DbgRow label="AI tro_data"           value={JSON.stringify(aiTro)} />
+              <DbgRow label="B-TRO (AI)"            value={aiTro?.ballasting_avg   ?? "null"} highlight={aiTro?.ballasting_avg != null} />
+              <DbgRow label="D-TRO (AI)"            value={aiTro?.deballasting_max ?? "null"} />
             </DbgSection>
 
-            {/* 4. TRO 비교 */}
-            <DbgSection title="🔬 TRO 추출 비교">
-              <DbgRow label="AI 추출 (Stage 1)"   value={JSON.stringify(dbg.aiTroData)} />
-              <DbgRow label="Stage 0 원본"         value={JSON.stringify(dbg.stage0RawTro)} />
-              <DbgRow label="병합 결과 (최종)"     value={JSON.stringify(dbg.mergedTroData)} highlight />
+            {/* 4. 최종 병합 결과 */}
+            <DbgSection title="✅ 최종 병합 결과">
+              <DbgRow label="B-TRO (최종)"          value={r.tro_data?.ballasting_avg   ?? "null"} highlight={r.tro_data?.ballasting_avg != null} />
+              <DbgRow label="D-TRO (최종)"          value={r.tro_data?.deballasting_max ?? "null"} />
+              <DbgRow label="ECU avg (최종)"        value={r.tro_data?.ecu_current_avg  ?? "null"} />
+              <DbgRow label="FMU avg (최종)"        value={r.tro_data?.fmu_flow_avg     ?? "null"} />
+              <DbgRow label="ANU status (최종)"     value={r.tro_data?.anu_status       ?? "null"} />
             </DbgSection>
 
-            {/* 5. VRCS */}
-            {dbg.stage0?.vrcs?.length > 0 && (
+            {/* 5. 운전 현황 */}
+            <DbgSection title="🚢 운전 현황">
+              <DbgRow label="operations 건수"       value={r.operations?.length ?? 0} />
+              {(r.operations || []).slice(0, 5).map((op, i) => (
+                <DbgRow key={i} label={`  #${i+1}`} value={`${op.operation_mode} | ${op.date ?? "-"} | vol=${op.ballast_volume ?? op.deballast_volume ?? "-"}`} />
+              ))}
+            </DbgSection>
+
+            {/* 6. VRCS */}
+            {(r.error_alarms || []).filter(a => a.code === 'VRCS_ERR').length > 0 && (
               <DbgSection title="🔧 VRCS 채터링 감지">
-                {dbg.stage0.vrcs.map((v, i) => (
-                  <DbgRow key={i} label={v.valve} value={`${v.count}회`} />
+                {r.error_alarms.filter(a => a.code === 'VRCS_ERR').map((a, i) => (
+                  <DbgRow key={i} label={a.description?.match(/\[([^\]]+)\]/)?.[1] ?? `#${i}`} value={`×${a.count ?? "?"}`} />
                 ))}
               </DbgSection>
             )}
