@@ -1019,7 +1019,20 @@ async function extractTotalLogText(blob) {
     headerText += (await extractPageText(pdfDoc, p)) + "\n";
   }
   const sections = parseReportList(headerText);
-  console.log("[pdf.js] Report List 파싱:", sections, `/ 전체 ${total}p`);
+
+  // ── Total Report 감지 ─────────────────────────────────────
+  // Total Report(통합 PDF)는 첫 페이지가 Report List 인덱스 페이지.
+  // ECS 시스템이 자기 페이지를 번호에 포함하지 않아 section 번호가 +1 오프셋 발생.
+  if (/Report\s+List/i.test(headerText) &&
+      sections.event_log_start != null &&
+      sections.op_time_start   != null) {
+    console.log('[pdf.js] Total Report 감지 — section 페이지 +1 offset 적용');
+    if (sections.event_log_start != null) sections.event_log_start += 1;
+    if (sections.op_time_start   != null) sections.op_time_start   += 1;
+    if (sections.data_log_start  != null) sections.data_log_start  += 1;
+  }
+  // ──────────────────────────────────────────────────────────
+  console.log("[pdf.js] Report List 파싱 (offset 적용 후):", sections, `/ 전체 ${total}p`);
 
   const textParts = [`=== 기본 정보 (p.1~5) ===\n${headerText}`];
 
@@ -1427,6 +1440,27 @@ export async function analyzePdfFromDrive(files, accessToken, vessel = {}) {
     if (s0.tro_data !== null) {
       console.log('[Stage0 Override] tro_data:', JSON.stringify(s0.tro_data));
       extracted.tro_data = { ...(extracted.tro_data || {}), ...s0.tro_data };
+    }
+    // Stage 0 VRCS override
+    if (s0.vrcs_data && s0.vrcs_data.length > 0) {
+      const alarms = extracted.error_alarms || [];
+      for (const { valve, count } of s0.vrcs_data) {
+        const exists = alarms.some(
+          a => a.code === 'VRCS_ERR' && a.description?.includes(valve)
+        );
+        if (!exists) {
+          alarms.push({
+            code:        'VRCS_ERR',
+            description: `Valve Opened/Closed 반복 오작동 감지 [${valve}]`,
+            level:       'Warning',
+            date:        null,
+            time:        null,
+            count:       count,
+          });
+          console.log(`[Stage0 Override] VRCS 추가: ${valve} ×${count}`);
+        }
+      }
+      extracted.error_alarms = alarms;
     }
   }
 

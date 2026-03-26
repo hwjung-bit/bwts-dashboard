@@ -194,6 +194,30 @@ export function parseDataLog(rows) {
   };
 }
 
+// ── Event Log VRCS 밸브 채터링 감지 ────────────────────────
+const VRCS_MIN_COUNT    = 10;  // 10회 이상 반복 시 채터링 판정
+const VRCS_SAMPLE_PAGES = 50;  // 이벤트로그 마지막 N페이지 샘플
+
+/** Event Log 행에서 밸브 채터링 패턴 감지
+ *  "Valve Opened.[BA008F,]" / "Valve Closed.[BA008F,]" 반복 집계
+ *  반환: [{ valve, count }, ...] count 내림차순
+ */
+function parseEventLogForVrcs(rows) {
+  const counts = {};
+  for (const row of rows) {
+    const text = row.cells.map(c => c.str).join(' ');
+    const m = text.match(/Valve\s+(?:Opened|Closed)\.\[([^\],]+)/i);
+    if (m) {
+      const valve = m[1].trim();
+      counts[valve] = (counts[valve] || 0) + 1;
+    }
+  }
+  return Object.entries(counts)
+    .filter(([, cnt]) => cnt >= VRCS_MIN_COUNT)
+    .sort((a, b) => b[1] - a[1])
+    .map(([valve, count]) => ({ valve, count }));
+}
+
 // ── ECS Op Time Log 파서 ───────────────────────────────────
 function isOpTimeLogHeader(row) {
   const text = row.cells.map(c => c.str.toUpperCase()).join(' ');
@@ -303,7 +327,7 @@ export async function parseEcsLogStructured(pdfDoc, sections, totalPages) {
   const total  = totalPages ?? pdfDoc.numPages;
   const opEnd  = (sections.data_log_start ?? sections.op_time_start + 15) - 1;
 
-  const result = { operations: null, tro_data: null };
+  const result = { operations: null, tro_data: null, vrcs_data: null };
 
   // Op Time Log 파싱
   try {
@@ -322,6 +346,23 @@ export async function parseEcsLogStructured(pdfDoc, sections, totalPages) {
       result.tro_data = parseDataLog(rows);
     } catch (e) {
       console.warn('[Stage0] Data Log parse failed:', e.message);
+    }
+  }
+
+  // Event Log VRCS 채터링 감지 (마지막 N페이지 샘플)
+  if (sections.event_log_start && sections.op_time_start) {
+    try {
+      const evEnd   = sections.op_time_start - 1;
+      const evStart = Math.max(sections.event_log_start, evEnd - VRCS_SAMPLE_PAGES + 1);
+      console.log(`[Stage0] Event Log VRCS 감지: p.${evStart}~${evEnd}`);
+      const evRows = await extractPagesRows(pdfDoc, evStart, evEnd);
+      const vrcs   = parseEventLogForVrcs(evRows);
+      if (vrcs.length > 0) {
+        result.vrcs_data = vrcs;
+        console.log('[Stage0] VRCS 감지:', vrcs.map(v => `${v.valve}×${v.count}`).join(', '));
+      }
+    } catch (e) {
+      console.warn('[Stage0] VRCS 감지 실패:', e.message);
     }
   }
 
