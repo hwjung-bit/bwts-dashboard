@@ -24,10 +24,13 @@ function parseKoreanDate(str) {
   return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
 }
 
-function isOverdue(dateStr) {
+/** 검교정일로부터 10개월 초과 (만료 2개월 전) → 빨간색 */
+function isExpiringSoon(dateStr) {
   const d = parseKoreanDate(dateStr);
   if (!d) return false;
-  return d < new Date(new Date().setHours(0, 0, 0, 0));
+  const expiry = new Date(d);
+  expiry.setMonth(expiry.getMonth() + 10);
+  return expiry < new Date(new Date().setHours(0, 0, 0, 0));
 }
 
 export default function CalibrationView({ accessToken }) {
@@ -187,7 +190,7 @@ export default function CalibrationView({ accessToken }) {
               const dateVal   = getVal(row, "date");
               const noteVal   = getVal(row, "note");
               const statusVal = getVal(row, "status");
-              const overdue   = isOverdue(dateVal);
+              const overdue   = isExpiringSoon(dateVal);
               const dirty     = isDirty(row.rowIndex);
               const isSaving  = saving[row.rowIndex];
 
@@ -269,11 +272,7 @@ export default function CalibrationView({ accessToken }) {
       <div className="flex items-center gap-4 mt-4 text-xs text-slate-400">
         <span className="flex items-center gap-1">
           <span className="w-2.5 h-2.5 rounded-full bg-red-400 inline-block" />
-          날짜 경과 (빨간색)
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="w-2.5 h-2.5 rounded-full bg-blue-100 border border-blue-200 inline-block" />
-          수정됨 (저장 전)
+          만료예정 (검교정 후 10개월 경과)
         </span>
         <span className="ml-auto">
           시트: <span className="font-medium text-slate-500">{sheetName || "로딩 중..."}</span>
