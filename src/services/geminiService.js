@@ -1006,9 +1006,11 @@ function parseReportList(text) {
 // TOTAL LOG 텍스트 추출 메인 함수
 async function extractTotalLogText(blob) {
   const pdfjsLib = await import("pdfjs-dist");
-  // CDN 워커 사용 (Vite 빌드 설정 불필요)
-  pdfjsLib.GlobalWorkerOptions.workerSrc =
-    `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+  // npm 패키지 내 worker 사용 (CDN 의존 제거 — Vite가 빌드 시 assets에 복사)
+  pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+    "pdfjs-dist/build/pdf.worker.min.mjs",
+    import.meta.url
+  ).href;
 
   const pdfDoc = await pdfjsLib.getDocument({ data: await blob.arrayBuffer() }).promise;
   const total  = pdfDoc.numPages;
