@@ -1337,47 +1337,117 @@ async function getOrUploadFileUri(fileId, accessToken, preloadedBlob = null) {
   return uri;
 }
 
+// ── ECS 파일 종류 감지 (파일명 기반) ────────────────────────
+// ECS 시스템이 생성하는 표준 파일명 패턴:
+//   DataReport / DataLog   → TRO 수치 전용
+//   EventLog / EventReport → 이벤트 로그 전용
+//   OperationTime / OpTime → 운전 기록 전용
+//   Report (수식어 없음)   → 합본 (Total)
+function detectEcsFileType(filename) {
+  const n = (filename || "").toUpperCase();
+  if (/DATA.?(LOG|REPORT)/i.test(n)) return "data";
+  if (/EVENT.?(LOG|REPORT)/i.test(n)) return "event";
+  if (/OPERATION.?TIME|OPTIME|OP.?TIME/i.test(n)) return "optime";
+  if (/TOTAL/i.test(n)) return "total";
+  if (/REPORT/i.test(n)) return "total";  // 수식어 없는 Report = Total
+  return "unknown";
+}
+
 export async function analyzePdfFromDrive(files, accessToken, vessel = {}) {
   const normalizedFiles = Array.isArray(files)
     ? files.map(f => typeof f === "string" ? { id: f, name: "" } : f)
     : [typeof files === "string" ? { id: files, name: "" } : files];
 
-  const ids = normalizedFiles.map(f => f.id);
+  // 파일 종류 분류
+  const filesByType = { total: [], data: [], event: [], optime: [], unknown: [] };
+  for (const f of normalizedFiles) {
+    filesByType[detectEcsFileType(f.name)].push(f);
+  }
+  console.log('[Files] 종류별 분류:', Object.entries(filesByType).filter(([,v])=>v.length).map(([k,v])=>`${k}:${v.length}`).join(', '));
 
-  // 파일명 기반 TOTAL LOG 사전 판단 (페이지 수 확인 전)
-  const isTotalByName = normalizedFiles.some(f =>
-    /TOTAL|TOTAL[\s_]LOG|DATA[\s_]LOG/i.test(f.name || "")
-  );
+  // 분석 우선순위: Total > (Event+Data+OpTime 개별) > unknown
+  // Total이 없으면 Event Log를 메인으로 사용 (가장 큰 파일)
+  const mainFiles  = filesByType.total.length  ? filesByType.total
+                   : filesByType.event.length  ? filesByType.event
+                   : filesByType.unknown;
+  const dataFiles  = filesByType.data;
+  const optFiles   = filesByType.optime;
+  const allIds     = normalizedFiles.map(f => f.id);
 
-  // ── TOTAL LOG 감지: 캐시 없는 파일 다운로드 후 페이지 수 확인 ──
-  const preloadedBlobs = new Map(); // fileId → blob (재다운로드 방지)
-  let totalLogExtraction = null;   // TOTAL LOG 텍스트 추출 결과
+  // ── 파일 다운로드 + TOTAL LOG 추출 ──────────────────────────
+  const preloadedBlobs = new Map();
+  let totalLogExtraction = null;
   let totalLogFileId     = null;
-  let totalLogError      = null;   // extractTotalLogText 실패 시 에러 메시지
+  let totalLogError      = null;
 
-  for (const id of ids) {
+  for (const f of [...mainFiles, ...dataFiles, ...optFiles, ...filesByType.unknown]) {
+    const id = f.id;
     const cached = _fileUriCache.get(id);
     if (cached && Date.now() - cached.uploadedAt < FILES_EXPIRE_MS) continue;
 
     const blob = await downloadDriveFile(id, accessToken);
-    const { PDFDocument } = await import("pdf-lib");
-    const pageCount = (await PDFDocument.load(await blob.arrayBuffer(), { ignoreEncryption: true })).getPageCount();
+    preloadedBlobs.set(id, blob);
 
-    if ((isTotalByName || pageCount > TOTAL_LOG_THRESHOLD) && !totalLogExtraction) {
-      // TOTAL LOG → pdf.js 텍스트 추출 경로
-      console.log(`[TOTAL LOG 감지] ${id}: ${pageCount}p → pdf.js 텍스트 추출 경로`);
-      try {
-        totalLogExtraction = await extractTotalLogText(blob);
-        totalLogFileId     = id;
-      } catch (e) {
-        totalLogError = e.message;
-        console.warn("[TOTAL LOG] pdf.js 추출 실패, 일반 경로 fallback:", e.message);
-        preloadedBlobs.set(id, blob);
+    if (!totalLogExtraction && mainFiles.some(mf => mf.id === id)) {
+      const { PDFDocument } = await import("pdf-lib");
+      const pageCount = (await PDFDocument.load(await blob.arrayBuffer(), { ignoreEncryption: true })).getPageCount();
+      if (pageCount > TOTAL_LOG_THRESHOLD) {
+        console.log(`[TOTAL LOG 감지] ${f.name || id}: ${pageCount}p → pdf.js 추출`);
+        try {
+          totalLogExtraction = await extractTotalLogText(blob);
+          totalLogFileId     = id;
+        } catch (e) {
+          totalLogError = e.message;
+          console.warn("[TOTAL LOG] pdf.js 실패, fallback:", e.message);
+        }
       }
-    } else {
-      preloadedBlobs.set(id, blob);
     }
   }
+
+  // ── Data Report 전용 Stage 0 TRO 추출 ──────────────────────
+  // Total Log에서 TRO를 못 얻었고 별도 DataReport 파일이 있으면 직접 파싱
+  let dataReportTro = null;
+  if (dataFiles.length > 0 && (!totalLogExtraction?.stage0?.tro_data)) {
+    try {
+      const pdfjsLib = await import("pdfjs-dist");
+      pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+        "pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url
+      ).href;
+      for (const df of dataFiles) {
+        const blob = preloadedBlobs.get(df.id) || await downloadDriveFile(df.id, accessToken);
+        const pdfDoc = await pdfjsLib.getDocument({ data: await blob.arrayBuffer() }).promise;
+        const { extractPageRowsExport, parseDataLog } = await import('./logParser.js');
+        const rows = [];
+        for (let p = 1; p <= pdfDoc.numPages; p++) rows.push(...await extractPageRowsExport(pdfDoc, p));
+        const tro = parseDataLog(rows);
+        if (tro) { dataReportTro = tro; console.log('[DataReport] TRO 추출:', JSON.stringify(tro)); break; }
+        await pdfDoc.destroy();
+      }
+    } catch (e) { console.warn('[DataReport] TRO 추출 실패:', e.message); }
+  }
+
+  // ── OpTime 전용 Stage 0 운전 기록 추출 ──────────────────────
+  let optimeOps = null;
+  if (optFiles.length > 0 && !totalLogExtraction?.stage0?.operations) {
+    try {
+      const pdfjsLib = await import("pdfjs-dist");
+      pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+        "pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url
+      ).href;
+      for (const of_ of optFiles) {
+        const blob = preloadedBlobs.get(of_.id) || await downloadDriveFile(of_.id, accessToken);
+        const pdfDoc = await pdfjsLib.getDocument({ data: await blob.arrayBuffer() }).promise;
+        const { extractPageRowsExport, parseOpTimeLog } = await import('./logParser.js');
+        const rows = [];
+        for (let p = 1; p <= pdfDoc.numPages; p++) rows.push(...await extractPageRowsExport(pdfDoc, p));
+        const ops = parseOpTimeLog(rows);
+        if (ops?.length) { optimeOps = ops; console.log('[OpTime] ops 추출:', ops.length, '건'); break; }
+        await pdfDoc.destroy();
+      }
+    } catch (e) { console.warn('[OpTime] 운전기록 추출 실패:', e.message); }
+  }
+
+  const ids = allIds;
 
   // ── 분기: TOTAL LOG 텍스트 경로 vs 일반 PDF URI 경로 ──────────
   let extractionParts;
@@ -1497,6 +1567,24 @@ export async function analyzePdfFromDrive(files, accessToken, vessel = {}) {
     }
   }
 
+  // ── 개별 파일 Stage 0 결과 보완 (Total Log에 없는 데이터를 별도 파일로 보충) ──
+  if (dataReportTro) {
+    const cur = extracted.tro_data || {};
+    const补 = Object.fromEntries(Object.entries(dataReportTro).filter(([, v]) => v !== null));
+    // 기존 null 필드만 덮어씀 (AI나 Total Stage0 값 우선)
+    const补Final = Object.fromEntries(Object.entries(补).filter(([k]) => cur[k] == null));
+    if (Object.keys(补Final).length) {
+      extracted.tro_data = { ...cur, ...补Final };
+      console.log('[DataReport] TRO 보완:', JSON.stringify(补Final));
+    }
+  }
+  if (optimeOps) {
+    if (!extracted.operations?.length) {
+      extracted.operations = optimeOps;
+      console.log('[OpTime] operations 보완:', optimeOps.length, '건');
+    }
+  }
+
   // 진단 패널용 _debug 조립 (관리자 전용 표시 — 항상 기록)
   extracted._debug = totalLogExtraction ? {
     totalPages:    totalLogExtraction.totalPages,
@@ -1504,10 +1592,14 @@ export async function analyzePdfFromDrive(files, accessToken, vessel = {}) {
     sections:      totalLogExtraction.sections,
     headerText:    totalLogExtraction.headerText ?? null,
     stage0RawTro:  totalLogExtraction.stage0?.tro_data ?? null,
+    dataReportTro: dataReportTro ?? null,
+    optimeOps:     optimeOps?.length ?? null,
     aiTroData:     _aiTroSnapshot,
   } : {
     totalLogFailed: true,
     totalLogError:  totalLogError ?? "알 수 없는 오류",
+    dataReportTro:  dataReportTro ?? null,
+    optimeOps:      optimeOps?.length ?? null,
   };
 
   // Stage 2: 분析/판정/remarks (JSON만, PDF 없음)
