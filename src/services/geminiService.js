@@ -1561,12 +1561,12 @@ export async function analyzePdfFromDrive(files, accessToken, vessel = {}) {
   // ── 개별 파일 Stage 0 결과 보완 (Total Log에 없는 데이터를 별도 파일로 보충) ──
   if (dataReportTro) {
     const cur = extracted.tro_data || {};
-    const补 = Object.fromEntries(Object.entries(dataReportTro).filter(([, v]) => v !== null));
+    const troNonNull = Object.fromEntries(Object.entries(dataReportTro).filter(([, v]) => v !== null));
     // 기존 null 필드만 덮어씀 (AI나 Total Stage0 값 우선)
-    const补Final = Object.fromEntries(Object.entries(补).filter(([k]) => cur[k] == null));
-    if (Object.keys(补Final).length) {
-      extracted.tro_data = { ...cur, ...补Final };
-      console.log('[DataReport] TRO 보완:', JSON.stringify(补Final));
+    const troFill = Object.fromEntries(Object.entries(troNonNull).filter(([k]) => cur[k] == null));
+    if (Object.keys(troFill).length) {
+      extracted.tro_data = { ...cur, ...troFill };
+      console.log('[DataReport] TRO 보완:', JSON.stringify(troFill));
     }
   }
   if (optimeOps) {
