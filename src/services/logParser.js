@@ -87,8 +87,11 @@ function rowToMap(row, matchCol) {
   return result;
 }
 
+// ── 외부 export (geminiService 자동 섹션 탐지용) ────────────
+export { extractPageRows as extractPageRowsExport };
+
 // ── ECS Data Log 파서 ──────────────────────────────────────
-function isDataLogHeader(row) {
+export function isDataLogHeader(row) {
   const text = row.cells.map(c => c.str.toUpperCase()).join(' ');
   return text.includes('INDEX') && text.includes('OPERATION') &&
     (text.includes('TRO') || text.includes('REC'));
@@ -241,7 +244,7 @@ function parseEventLogForVrcs(rows) {
 }
 
 // ── ECS Op Time Log 파서 ───────────────────────────────────
-function isOpTimeLogHeader(row) {
+export function isOpTimeLogHeader(row) {
   const text = row.cells.map(c => c.str.toUpperCase()).join(' ');
   return text.includes('OPERATION') &&
     (text.includes('START') || text.includes('RUNNING') || text.includes('RUN TIME'));

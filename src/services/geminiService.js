@@ -1034,8 +1034,28 @@ async function extractTotalLogText(blob) {
     if (sections.op_time_start   != null) sections.op_time_start   += 1;
     if (sections.data_log_start  != null) sections.data_log_start  += 1;
   }
+  // ── Report List 없을 때: 마지막 60p 스캔으로 섹션 자동 탐지 ──
+  if (!sections.op_time_start) {
+    const { isOpTimeLogHeader, isDataLogHeader, extractPageRowsExport } = await import('./logParser.js');
+    const scanStart = Math.max(1, total - 59);
+    console.log(`[pdf.js] Report List 미감지 — 자동 섹션 탐지: p.${scanStart}~${total}`);
+    for (let p = scanStart; p <= total; p++) {
+      const rows = await extractPageRowsExport(pdfDoc, p);
+      if (!sections.op_time_start && rows.some(isOpTimeLogHeader)) {
+        sections.op_time_start = p;
+        console.log(`[pdf.js] Op Time Log 자동 감지: p.${p}`);
+      }
+      if (sections.op_time_start && !sections.data_log_start && rows.some(isDataLogHeader)) {
+        sections.data_log_start = p;
+        console.log(`[pdf.js] Data Log 자동 감지: p.${p}`);
+      }
+    }
+    if (sections.op_time_start && !sections.event_log_start) {
+      sections.event_log_start = 1;  // Event Log = PDF 처음부터
+    }
+  }
   // ──────────────────────────────────────────────────────────
-  console.log("[pdf.js] Report List 파싱 (offset 적용 후):", sections, `/ 전체 ${total}p`);
+  console.log("[pdf.js] 섹션 파싱 결과:", sections, `/ 전체 ${total}p`);
 
   const textParts = [`=== 기본 정보 (p.1~5) ===\n${headerText}`];
 
