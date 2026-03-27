@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from "react";
 import { CONFIG, CALIB_CONFIG } from "../config.js";
 import {
   getSheetNameByGid,
+  listSheetNames,
   readCalibration,
   updateCalibCell,
 } from "../services/sheetsService.js";
@@ -74,7 +75,16 @@ export default function CalibrationView({ accessToken }) {
       setRows(data);
       setEdited({});
     } catch (e) {
-      setError(e.message);
+      // 400 에러 시 실제 탭 목록 조회해서 힌트 제공
+      if (e.message.includes("400")) {
+        const names = await listSheetNames(CALIB_SHEET_ID, accessToken).catch(() => []);
+        const hint = names.length > 0
+          ? `\n실제 탭 목록: ${names.map(n => `"${n}"`).join(", ")}`
+          : "";
+        setError(e.message + hint);
+      } else {
+        setError(e.message);
+      }
     } finally {
       setLoading(false);
     }

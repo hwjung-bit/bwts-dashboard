@@ -186,11 +186,25 @@ export async function upsertMonthlyEntry(sheetId, vesselId, year, month, entry, 
   }
 }
 
-// ── Calibration History (외부 시트) ──────────────────────────
+// ── Calibration History ───────────────────────────────────────
+
+/**
+ * 스프레드시트의 모든 탭 이름 조회 (디버그용)
+ * @returns {Promise<string[]>}
+ */
+export async function listSheetNames(spreadsheetId, accessToken) {
+  const res = await fetch(
+    `${BASE}/${spreadsheetId}?fields=sheets.properties.title`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  if (!res.ok) return [];
+  const json = await res.json();
+  return (json.sheets || []).map((s) => s.properties.title);
+}
 
 /**
  * GID로 시트 탭명 조회
- * @returns {Promise<string|null>} 탭명 (e.g. "BWTS 검교정")
+ * @returns {Promise<string|null>}
  */
 export async function getSheetNameByGid(spreadsheetId, gid, accessToken) {
   const res = await fetch(
@@ -206,22 +220,25 @@ export async function getSheetNameByGid(spreadsheetId, gid, accessToken) {
 }
 
 /**
- * 검교정 데이터 읽기 (행3~23 = 데이터, 행1~2 = 헤더)
+ * 검교정 데이터 읽기 — batchGet + URLSearchParams 방식으로 인코딩 문제 회피
  * @returns {Promise<Array<{rowIndex,vesselCode,note,date,status}>>}
  */
 export async function readCalibration(spreadsheetId, sheetName, accessToken) {
-  const safeName = sheetName.includes(" ") ? `'${sheetName}'` : sheetName;
-  const range = encodeURIComponent(`${safeName}!A1:D23`);
+  const rangeStr = `'${sheetName}'!A1:D23`;
+  const params = new URLSearchParams({
+    ranges: rangeStr,
+    valueRenderOption: "UNFORMATTED_VALUE",
+  });
   const res = await fetch(
-    `${BASE}/${spreadsheetId}/values/${range}?valueRenderOption=UNFORMATTED_VALUE`,
+    `${BASE}/${spreadsheetId}/values:batchGet?${params}`,
     { headers: { Authorization: `Bearer ${accessToken}` } }
   );
   if (!res.ok) throw new Error(`readCalibration: ${res.status}`);
   const json = await res.json();
-  const rows = json.values || [];
+  const rows = json.valueRanges?.[0]?.values || [];
   // 헤더 2행 skip → index 2 이후가 데이터
   return rows.slice(2).map((r, i) => ({
-    rowIndex:   i + 3,       // 시트 1-based 행 번호
+    rowIndex:   i + 3,
     vesselCode: r[0] || "",
     note:       r[1] || "",
     date:       r[2] || "",
@@ -234,10 +251,10 @@ export async function readCalibration(spreadsheetId, sheetName, accessToken) {
  * @param {string} col - 'B'(특이사항) | 'C'(날짜) | 'D'(진행상황)
  */
 export async function updateCalibCell(spreadsheetId, sheetName, rowIndex, col, value, accessToken) {
-  const safeName = sheetName.includes(" ") ? `'${sheetName}'` : sheetName;
-  const range = encodeURIComponent(`${safeName}!${col}${rowIndex}`);
+  const rangeStr = `'${sheetName}'!${col}${rowIndex}`;
+  const params = new URLSearchParams({ valueInputOption: "USER_ENTERED" });
   const res = await fetch(
-    `${BASE}/${spreadsheetId}/values/${range}?valueInputOption=USER_ENTERED`,
+    `${BASE}/${spreadsheetId}/values/${encodeURIComponent(rangeStr)}?${params}`,
     {
       method: "PUT",
       headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
