@@ -227,7 +227,7 @@ export async function readCalibration(spreadsheetId, sheetName, accessToken) {
   const rangeStr = `'${sheetName}'!A1:D23`;
   const params = new URLSearchParams({
     ranges: rangeStr,
-    valueRenderOption: "UNFORMATTED_VALUE",
+    valueRenderOption: "FORMATTED_VALUE",  // 날짜 셀을 "2025. 9. 6." 형태 문자열로 반환
   });
   const res = await fetch(
     `${BASE}/${spreadsheetId}/values:batchGet?${params}`,
