@@ -132,10 +132,10 @@ export function buildMailBody(vessel, analysisResult, finalRemark, lang = "ko") 
     const opsLine = getOpsLine(remarksArr);
     return `안녕하세요,
 
-${shipName} 선박의 ${period} BWTS 운전 로그 분석 결과입니다.
+${shipName} 선박의 ${period ?? "-"} BWTS 운전 로그 분석 결과입니다.
 
 ${SEP}
-  선박 : ${shipName}     기간 : ${period}     결과 : ${statusKo}
+  선박 : ${shipName}     기간 : ${period ?? "-"}     결과 : ${statusKo}
 ${SEP}
 
 [발생 알람]
@@ -160,10 +160,10 @@ BWTS 관리 담당자`;
   const opsLineEn = getOpsLine(remarksEnArr.length > 0 ? remarksEnArr : remarksArr);
   return `Dear Sir/Madam,
 
-Please find the BWTS operation log analysis for ${shipName} (${period}).
+Please find the BWTS operation log analysis for ${shipName} (${period ?? "-"}).
 
 ${SEP}
-  Vessel : ${shipName}     Period : ${period}     Result : ${statusEn}
+  Vessel : ${shipName}     Period : ${period ?? "-"}     Result : ${statusEn}
 ${SEP}
 
 [ALARM SUMMARY]

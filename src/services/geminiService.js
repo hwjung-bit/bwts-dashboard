@@ -132,33 +132,11 @@ function appendValveWarning(data) {
   data.ai_remarks_en = remarksEnArr;
 }
 
-// ── TRO 범위 체크 → ai_remarks 보완 ──────────────────────────
+// ── TRO 범위 체크 (remarks는 autoFillRemarks의 [운전 현황]에서 처리) ────
+// 이 함수는 overall_status 재계산에 앞서 호출되어 TRO 범위 이탈을 로그로만 남김
 function checkTroRange(data) {
-  const tro = data.tro_data || {};
-  const notes = [];
-
-  if (tro.ballasting_avg != null) {
-    if (tro.ballasting_avg < 5)
-      notes.push(`주입 TRO ${tro.ballasting_avg}ppm — 정상 기준(5~10ppm) 미달, CLX 시약 상태 확인 필요.`);
-    else if (tro.ballasting_avg > 10)
-      notes.push(`주입 TRO ${tro.ballasting_avg}ppm — 정상 기준(5~10ppm) 초과.`);
-  }
-  if (tro.deballasting_max != null && tro.deballasting_max > 0.1)
-    notes.push(`배출 TRO 최댓값 ${tro.deballasting_max}ppm — IMO 기준(0.1ppm) 초과, 즉시 확인 필요.`);
-
-  const remarksArr = Array.isArray(data.ai_remarks) ? data.ai_remarks : [];
-  const remarksEnArr = Array.isArray(data.ai_remarks_en) ? data.ai_remarks_en : [];
-  for (const note of notes) {
-    if (!remarksArr.some((l) => l.includes(note.slice(0, 12)))) remarksArr.push(note);
-    const noteEn =
-      note.includes("미달")   ? `Ballasting TRO ${tro.ballasting_avg}ppm — below normal range (5~10ppm), check CLX reagent condition.`
-      : note.includes("초과") && note.includes("주입") ? `Ballasting TRO ${tro.ballasting_avg}ppm — exceeds normal range (5~10ppm).`
-      : `Deballasting TRO max ${tro.deballasting_max}ppm — exceeds IMO limit (0.1ppm), immediate check required.`;
-    if (!remarksEnArr.some((l) => l.includes(String(tro.ballasting_avg ?? tro.deballasting_max))))
-      remarksEnArr.push(noteEn);
-  }
-  data.ai_remarks = remarksArr;
-  data.ai_remarks_en = remarksEnArr;
+  // TRO 이탈 여부는 recalcOverallStatus + autoFillRemarks에서 처리됨
+  // (이전에 ai_remarks에 직접 추가하던 로직 → autoFillRemarks [운전 현황] 라인으로 통합)
 }
 
 // ── overall_status JS 완전 재계산 ────────────────────────────
@@ -322,12 +300,6 @@ const ALARM_ACTION_EN = {
 
 // ── ai_remarks 항상 전체 템플릿으로 생성 (Stage 2 AI 대체) ────
 function autoFillRemarks(data) {
-  // Stage 1 AI가 충분한 remarks을 이미 생성했으면 유지 (비어있을 때만 생성)
-  const hasContent = Array.isArray(data.ai_remarks)
-    ? data.ai_remarks.length > 0
-    : (data.ai_remarks && data.ai_remarks.length > 20);
-  if (hasContent) return;
-
   const ops          = data.operations || [];
   const ballastCount = ops.filter(o => /^BALLAST$/i.test(o.operation_mode)).length;
   const deballastCount = ops.filter(o => /^DEBALLAST$/i.test(o.operation_mode)).length;

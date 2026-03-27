@@ -110,6 +110,7 @@ export default function VesselDetail({ vessel, onClose, isAdmin }) {
     주입: op.ballast_volume || 0,
     배출: op.deballast_volume || 0,
   }));
+  const hasVolumeData = chartData.some(d => d.주입 > 0 || d.배출 > 0);
 
   return (
     <div className="mt-4 bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
@@ -302,6 +303,7 @@ export default function VesselDetail({ vessel, onClose, isAdmin }) {
           {chartData.length > 0 && (
             <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
               <div className="text-xs text-slate-500 font-medium mb-4">운전량 (최근 10회, m³)</div>
+              {hasVolumeData ? (
               <ResponsiveContainer width="100%" height={200}>
                 <BarChart data={chartData} barCategoryGap="30%">
                   <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#94a3b8" }} />
@@ -311,6 +313,11 @@ export default function VesselDetail({ vessel, onClose, isAdmin }) {
                   <Bar dataKey="배출" fill="#3b82f6" radius={[3, 3, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
+              ) : (
+              <div className="flex items-center justify-center h-[200px] text-xs text-slate-400">
+                운전량(m³) 데이터 없음 — Operation Time 파일에 볼륨 미기재
+              </div>
+              )}
               <div className="flex gap-4 mt-2 justify-center text-xs text-slate-400">
                 <span className="flex items-center gap-1"><span className="w-3 h-1.5 bg-green-500 rounded-sm" />주입</span>
                 <span className="flex items-center gap-1"><span className="w-3 h-1.5 bg-blue-500 rounded-sm" />배출</span>
