@@ -210,7 +210,8 @@ export async function getSheetNameByGid(spreadsheetId, gid, accessToken) {
  * @returns {Promise<Array<{rowIndex,vesselCode,note,date,status}>>}
  */
 export async function readCalibration(spreadsheetId, sheetName, accessToken) {
-  const range = encodeURIComponent(`${sheetName}!A1:D23`);
+  const safeName = sheetName.includes(" ") ? `'${sheetName}'` : sheetName;
+  const range = encodeURIComponent(`${safeName}!A1:D23`);
   const res = await fetch(
     `${BASE}/${spreadsheetId}/values/${range}?valueRenderOption=UNFORMATTED_VALUE`,
     { headers: { Authorization: `Bearer ${accessToken}` } }
@@ -233,7 +234,8 @@ export async function readCalibration(spreadsheetId, sheetName, accessToken) {
  * @param {string} col - 'B'(특이사항) | 'C'(날짜) | 'D'(진행상황)
  */
 export async function updateCalibCell(spreadsheetId, sheetName, rowIndex, col, value, accessToken) {
-  const range = encodeURIComponent(`${sheetName}!${col}${rowIndex}`);
+  const safeName = sheetName.includes(" ") ? `'${sheetName}'` : sheetName;
+  const range = encodeURIComponent(`${safeName}!${col}${rowIndex}`);
   const res = await fetch(
     `${BASE}/${spreadsheetId}/values/${range}?valueInputOption=USER_ENTERED`,
     {
