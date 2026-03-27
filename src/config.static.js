@@ -100,8 +100,9 @@ export function mapOverallStatus(status, alarms = []) {
 }
 
 // ── 검교정 이력 설정 (비민감 — GitHub 커밋 OK) ─────────────
+// SHEET_ID: 별도 스프레드시트인 경우 설정. 비워두면 CONFIG.SHEETS_ID(메인 시트) 사용
 export const CALIB_CONFIG = {
-  SHEET_ID:       "1Kv7dIhAs_QfvccAxjGev-EutU_VtgOm4TQclDB72Y6A",
+  SHEET_ID:       "",  // 메인 스프레드시트 내 탭으로 운영 → CONFIG.SHEETS_ID 사용
   GID:            297341548,
   STATUS_OPTIONS: ["", "진행 예정", "확인필요", "업체요청필요"],
 };

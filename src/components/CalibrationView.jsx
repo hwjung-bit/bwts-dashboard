@@ -1,11 +1,14 @@
 // CalibrationView — BWTS 검교정 이력 조회 & 편집
 import { useState, useEffect, useCallback } from "react";
-import { CALIB_CONFIG } from "../config.js";
+import { CONFIG, CALIB_CONFIG } from "../config.js";
 import {
   getSheetNameByGid,
   readCalibration,
   updateCalibCell,
 } from "../services/sheetsService.js";
+
+// 검교정 시트는 메인 스프레드시트 내 별도 탭 (CALIB_CONFIG.SHEET_ID가 없으면 CONFIG.SHEETS_ID 사용)
+const CALIB_SHEET_ID = CALIB_CONFIG.SHEET_ID || CONFIG.SHEETS_ID;
 
 const STATUS_OPTIONS = CALIB_CONFIG.STATUS_OPTIONS;
 
@@ -58,11 +61,11 @@ export default function CalibrationView({ accessToken }) {
     try {
       let name = sheetName;
       if (!name) {
-        name = await getSheetNameByGid(CALIB_CONFIG.SHEET_ID, CALIB_CONFIG.GID, accessToken);
+        name = await getSheetNameByGid(CALIB_SHEET_ID, CALIB_CONFIG.GID, accessToken);
         if (!name) throw new Error("시트 탭명을 가져올 수 없습니다 (gid: " + CALIB_CONFIG.GID + ")");
         setSheetName(name);
       }
-      const data = await readCalibration(CALIB_CONFIG.SHEET_ID, name, accessToken);
+      const data = await readCalibration(CALIB_SHEET_ID, name, accessToken);
       setRows(data);
       setEdited({});
     } catch (e) {
@@ -107,7 +110,7 @@ export default function CalibrationView({ accessToken }) {
       const colMap = { note: "B", date: "C", status: "D" };
       for (const [field, value] of Object.entries(changes)) {
         await updateCalibCell(
-          CALIB_CONFIG.SHEET_ID,
+          CALIB_SHEET_ID,
           sheetName,
           row.rowIndex,
           colMap[field],
