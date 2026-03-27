@@ -191,10 +191,13 @@ export default function VesselDetail({ vessel, onClose, isAdmin }) {
             </DbgSection>
 
             {/* 3. AI Stage 1 결과 */}
-            <DbgSection title="🤖 AI Stage 1 결과">
+            <DbgSection title={dbg.totalLogFailed ? "🤖 AI Stage 1 결과 (직접 PDF 분석)" : "🤖 AI Stage 1 결과 (텍스트 추출 후 분석)"}>
+              {dbg.totalLogFailed && <DbgErr msg="pdf.js 실패 → Gemini가 PDF를 직접 읽어 추출한 값 (정확도 낮을 수 있음)" />}
               <DbgRow label="AI tro_data"           value={JSON.stringify(aiTro)} />
               <DbgRow label="B-TRO (AI)"            value={aiTro?.ballasting_avg   ?? "null"} highlight={aiTro?.ballasting_avg != null} />
               <DbgRow label="D-TRO (AI)"            value={aiTro?.deballasting_max ?? "null"} />
+              <DbgRow label="ECU avg (AI)"          value={aiTro?.ecu_current_avg  ?? "null"} />
+              <DbgRow label="FMU avg (AI)"          value={aiTro?.fmu_flow_avg     ?? "null"} />
             </DbgSection>
 
             {/* 4. 최종 병합 결과 */}

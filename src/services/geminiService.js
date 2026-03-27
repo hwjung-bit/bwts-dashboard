@@ -982,8 +982,8 @@ export async function analyzePdfFromDrive(files, accessToken, vessel = {}) {
         totalLogFileId     = f.id;
         break;
       } catch (e) {
-        totalLogError = e.message;
-        console.warn("[TOTAL LOG] pdf.js 실패:", e.message);
+        totalLogError = e?.message || String(e) || "알 수 없는 오류";
+        console.warn("[TOTAL LOG] pdf.js 실패:", totalLogError, e);
       }
     }
   }
@@ -1138,7 +1138,8 @@ export async function analyzePdfFromDrive(files, accessToken, vessel = {}) {
     aiTroData:     _aiTroSnapshot,
   } : {
     totalLogFailed: true,
-    totalLogError:  totalLogError ?? "알 수 없는 오류",
+    totalLogError:  totalLogError || "알 수 없는 오류",
+    aiTroData:      _aiTroSnapshot,   // 일반 Gemini 경로에서 뽑아낸 AI Stage 1 결과
     dataReportTro:  dataReportTro ?? null,
     optimeOps:      optimeOps?.length ?? null,
   };
