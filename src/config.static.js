@@ -101,8 +101,10 @@ export function mapOverallStatus(status, alarms = []) {
 
 // ── 검교정 이력 설정 (비민감 — GitHub 커밋 OK) ─────────────
 // SHEET_ID: 별도 스프레드시트인 경우 설정. 비워두면 CONFIG.SHEETS_ID(메인 시트) 사용
+// SHEET_NAME: GID 조회 없이 탭 이름으로 직접 접근 (GID 불일치 문제 회피)
 export const CALIB_CONFIG = {
-  SHEET_ID:       "",  // 메인 스프레드시트 내 탭으로 운영 → CONFIG.SHEETS_ID 사용
-  GID:            297341548,
+  SHEET_ID:       "",              // 메인 스프레드시트 내 탭으로 운영
+  SHEET_NAME:     "BWTS 검교정",   // 탭 이름 직접 지정 (GID 조회 불필요)
+  GID:            297341548,       // fallback용 (SHEET_NAME 있으면 미사용)
   STATUS_OPTIONS: ["", "진행 예정", "확인필요", "업체요청필요"],
 };

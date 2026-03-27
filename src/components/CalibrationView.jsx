@@ -61,8 +61,13 @@ export default function CalibrationView({ accessToken }) {
     try {
       let name = sheetName;
       if (!name) {
-        name = await getSheetNameByGid(CALIB_SHEET_ID, CALIB_CONFIG.GID, accessToken);
-        if (!name) throw new Error("시트 탭명을 가져올 수 없습니다 (gid: " + CALIB_CONFIG.GID + ")");
+        // SHEET_NAME이 설정된 경우 GID 조회 없이 직접 사용
+        if (CALIB_CONFIG.SHEET_NAME) {
+          name = CALIB_CONFIG.SHEET_NAME;
+        } else {
+          name = await getSheetNameByGid(CALIB_SHEET_ID, CALIB_CONFIG.GID, accessToken);
+          if (!name) throw new Error("시트 탭명을 가져올 수 없습니다 (gid: " + CALIB_CONFIG.GID + ")");
+        }
         setSheetName(name);
       }
       const data = await readCalibration(CALIB_SHEET_ID, name, accessToken);
