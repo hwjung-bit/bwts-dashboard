@@ -124,7 +124,7 @@ export default function VesselDetail({ vessel, onClose, isAdmin }) {
           )}
         </div>
         <div className="flex items-center gap-2">
-          {r && r._debug && (
+          {isAdmin && r && r._debug && (
             <button
               onClick={() => setShowDebug(p => !p)}
               title="파싱 진단"
@@ -154,7 +154,7 @@ export default function VesselDetail({ vessel, onClose, isAdmin }) {
       )}
 
       {/* 🔍 진단 패널 (관리자 전용) */}
-      {showDebug && r && r._debug && (() => {
+      {isAdmin && showDebug && r && r._debug && (() => {
         const dbg = r._debug || {};
         const s0Tro = dbg.stage0RawTro;
         const aiTro = dbg.aiTroData;
@@ -165,8 +165,15 @@ export default function VesselDetail({ vessel, onClose, isAdmin }) {
             {/* 1. PDF 구조 */}
             <DbgSection title="📄 PDF 구조">
               {dbg.totalLogFailed
-                ? <DbgErr msg={`pdf.js 추출 실패 → 일반 Gemini 경로 사용: ${dbg.totalLogError}`} />
+                ? <>
+                    <DbgRow label="Main PDF 페이지" value={dbg.mainFilePages != null ? `${dbg.mainFilePages}p` : "알 수 없음"} />
+                    <DbgErr msg={dbg.totalLogError
+                      ? `pdf.js 추출 실패 (${dbg.mainFilePages ?? "?"}p): ${dbg.totalLogError}`
+                      : `pdf.js 텍스트 없음 (${dbg.mainFilePages ?? "?"}p) — Stage 0 데이터만 사용`
+                    } />
+                  </>
                 : <>
+                    <DbgRow label="Main PDF 페이지"          value={dbg.mainFilePages != null ? `${dbg.mainFilePages}p` : "알 수 없음"} />
                     <DbgRow label="전체 페이지"              value={dbg.totalPages ?? "알 수 없음 (재분석 필요)"} />
                     <DbgRow label="Total Report (+1 offset)" value={dbg.isTotalReport ? "✅ 감지됨" : "❌ 미감지"} />
                     <DbgRow label="Event Log 시작"           value={dbg.sections?.event_log_start ?? "null"} />
@@ -191,8 +198,8 @@ export default function VesselDetail({ vessel, onClose, isAdmin }) {
             </DbgSection>
 
             {/* 3. AI Stage 1 결과 */}
-            <DbgSection title={dbg.totalLogFailed ? "🤖 AI Stage 1 결과 (직접 PDF 분석)" : "🤖 AI Stage 1 결과 (텍스트 추출 후 분석)"}>
-              {dbg.totalLogFailed && <DbgErr msg="pdf.js 실패 → Gemini가 PDF를 직접 읽어 추출한 값 (정확도 낮을 수 있음)" />}
+            <DbgSection title={dbg.totalLogFailed ? "🤖 AI Stage 1 결과 (미실행 — Stage 0만 사용)" : "🤖 AI Stage 1 결과 (텍스트 추출 후 분석)"}>
+              {dbg.totalLogFailed && <DbgErr msg="pdf.js 실패 → AI 분석 없음, Stage 0 데이터만 최종 반영" />}
               <DbgRow label="AI tro_data"           value={JSON.stringify(aiTro)} />
               <DbgRow label="B-TRO (AI)"            value={aiTro?.ballasting_avg   ?? "null"} highlight={aiTro?.ballasting_avg != null} />
               <DbgRow label="D-TRO (AI)"            value={aiTro?.deballasting_max ?? "null"} />

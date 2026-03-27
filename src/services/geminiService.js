@@ -12,10 +12,8 @@ import { CONFIG } from "../config.js";
 import {
   STAGE1_TEXT_SCHEMA,
   STAGE1_RESPONSE_SCHEMA,
-  STAGE2_RESPONSE_SCHEMA,
   EXTRACTION_PROMPT,
   EXTRACTION_PROMPT_TOTALLOG,
-  ANALYSIS_PROMPT,
   REMARK_PROMPT_TEMPLATE,
   SECTION_DISCOVERY_PROMPT,
 } from "./prompts.js";
@@ -296,50 +294,114 @@ function checkZeroOperations(data) {
   }
 }
 
-// ── ai_remarks 비어있을 때 기본 요약 자동 생성 ────────────────
+// ── 알람 코드별 권고 조치 룩업 ────────────────────────────────
+const ALARM_ACTION_KO = {
+  CODE200:      "CLX 시약 상태 점검 및 샘플링 라인 확인",
+  CODE201:      "중화제(STS) 주입 펌프 및 탱크 레벨 확인",
+  CODE301:      "중화제 탱크 레벨 센서 및 밸브 점검",
+  CODE302:      "중화제 탱크 레벨 센서 및 밸브 점검",
+  CODE303:      "중화제 탱크 레벨 센서 및 밸브 점검",
+  CODE605:      "단속 운전 발생 — ECS 재기동 원인 확인 권장",
+  CODE701:      "PLC 및 모듈 간 통신 케이블 연결 상태 확인",
+  CODE721:      "해당 밸브 공압 상태 및 리미트 스위치 점검",
+  VRCS_ERR:     "[긴급] 밸브 채터링 감지 — 공압 라인·리미트 스위치 즉각 점검",
+  LOG_OVERFLOW: "Event Log 100건 초과 — 전체 로그 상세 검토 권고",
+};
+const ALARM_ACTION_EN = {
+  CODE200:      "Check CLX reagent condition and sampling line",
+  CODE201:      "Check STS neutralizer injection pump and tank level",
+  CODE301:      "Inspect neutralizer tank level sensor and valves",
+  CODE302:      "Inspect neutralizer tank level sensor and valves",
+  CODE303:      "Inspect neutralizer tank level sensor and valves",
+  CODE605:      "Intermittent operation detected — check ECS restart cause",
+  CODE701:      "Check PLC and inter-module communication cables",
+  CODE721:      "Inspect valve pneumatic pressure and limit switches",
+  VRCS_ERR:     "[URGENT] Valve chattering detected — immediately inspect pneumatic line and limit switches",
+  LOG_OVERFLOW: "Event Log exceeded 100 entries — detailed log review recommended",
+};
+
+// ── ai_remarks 항상 전체 템플릿으로 생성 (Stage 2 AI 대체) ────
 function autoFillRemarks(data) {
-  // 배열이면 원소가 1개 이상이어야 스킵, 문자열이면 20자 이상이어야 스킵
+  // Stage 1 AI가 충분한 remarks을 이미 생성했으면 유지 (비어있을 때만 생성)
   const hasContent = Array.isArray(data.ai_remarks)
     ? data.ai_remarks.length > 0
     : (data.ai_remarks && data.ai_remarks.length > 20);
   if (hasContent) return;
 
-  const ops            = data.operations || [];
-  const ballastCount   = ops.filter((o) => (o.operation_mode || "").includes("BALLAST") && !o.operation_mode.includes("DE")).length;
-  const deballastCount = ops.filter((o) => o.operation_mode === "DEBALLAST").length;
-  const tro            = data.tro_data || {};
-  const alarmCount     = (data.error_alarms || []).length;
+  const ops          = data.operations || [];
+  const ballastCount = ops.filter(o => /^BALLAST$/i.test(o.operation_mode)).length;
+  const deballastCount = ops.filter(o => /^DEBALLAST$/i.test(o.operation_mode)).length;
+  const tro          = data.tro_data || {};
+  const alarms       = data.error_alarms || [];
 
-  const parts   = [];
-  const partsEn = [];
+  const koLines = [];
+  const enLines = [];
 
-  if (ballastCount || deballastCount) {
-    parts.push(`당월 주입 ${ballastCount}회 / 배출 ${deballastCount}회 운전.`);
-    partsEn.push(`This month: ${ballastCount} ballasting / ${deballastCount} deballasting operations.`);
+  // ─ [운전 현황] ─────────────────────────────────────────────
+  const bAvg = tro.ballasting_avg;
+  const dMax = tro.deballasting_max;
+  const bOk  = bAvg != null && bAvg >= 5 && bAvg <= 10;
+  const dOk  = dMax != null && dMax < 0.1;
+
+  const bTroKo = bAvg != null ? `${bAvg}ppm(5~10ppm ${bOk ? "충족" : bAvg < 5 ? "미달" : "초과"})` : "미수신";
+  const dTroKo = dMax != null ? `${dMax}ppm(IMO 기준 ${dOk ? "충족" : "초과"})` : "미수신";
+  const bTroEn = bAvg != null ? `${bAvg}ppm(5~10ppm: ${bOk ? "OK" : bAvg < 5 ? "low" : "high"})` : "N/A";
+  const dTroEn = dMax != null ? `${dMax}ppm(IMO: ${dOk ? "compliant" : "exceeded"})` : "N/A";
+
+  koLines.push(`[운전 현황] 주입 ${ballastCount}회 / 배출 ${deballastCount}회. 주입 TRO ${bTroKo}. 배출 TRO 최댓값 ${dTroKo}.`);
+  enLines.push(`[Operations] ${ballastCount} ballasting / ${deballastCount} deballasting. Ballasting TRO ${bTroEn}. Deballasting TRO max ${dTroEn}.`);
+
+  // ─ [ECU] ──────────────────────────────────────────────────
+  if (tro.ecu_current_avg != null || tro.fmu_flow_avg != null || tro.anu_status) {
+    const parts = [
+      tro.ecu_current_avg != null ? `전류 ${tro.ecu_current_avg}A` : null,
+      tro.fmu_flow_avg    != null ? `유량 ${tro.fmu_flow_avg}m³/h` : null,
+      tro.anu_status               ? `ANU ${tro.anu_status}`        : null,
+    ].filter(Boolean).join(" / ");
+    koLines.push(`[ECU] ${parts}.`);
+    enLines.push(`[ECU] ${parts}.`);
+  }
+
+  // ─ 알람 코드별 ────────────────────────────────────────────
+  if (alarms.length === 0) {
+    koLines.push("[알람없음] 이상 알람 없음.");
+    enLines.push("[No Alarms] No abnormal alarms detected.");
   } else {
-    parts.push("당월 운전 기록이 없습니다.");
-    partsEn.push("No ballasting/deballasting operations recorded this month.");
-  }
-  if (tro.ballasting_avg != null) {
-    parts.push(`주입 평균 TRO ${tro.ballasting_avg}ppm.`);
-    partsEn.push(`Avg ballasting TRO ${tro.ballasting_avg}ppm.`);
-  }
-  if (tro.deballasting_max != null) {
-    parts.push(`배출 TRO 최댓값 ${tro.deballasting_max}ppm.`);
-    partsEn.push(`Max deballasting TRO ${tro.deballasting_max}ppm.`);
-  }
-  if (alarmCount > 0) {
-    parts.push(`알람/에러 ${alarmCount}건 발생.`);
-    partsEn.push(`Alarms/errors: ${alarmCount} occurrences.`);
-  } else if (alarmCount === 0 && ops.length > 0) {
-    parts.push("알람/에러 없음.");
-    partsEn.push("No alarms/errors.");
+    // 코드별로 집계 (groupRepeatAlarms 처리 후라 count 필드 있음)
+    const codeMap = new Map();
+    for (const a of alarms) {
+      const code = a.code || "(코드없음)";
+      if (!codeMap.has(code)) codeMap.set(code, { trips: 0, total: 0 });
+      const g = codeMap.get(code);
+      const cnt = a.count || 1;
+      if ((a.level || "").toLowerCase() === "trip") g.trips += cnt;
+      g.total += cnt;
+    }
+    for (const [code, g] of codeMap) {
+      const nonTrips = g.total - g.trips;
+      const parts = [g.trips && `Trip×${g.trips}`, nonTrips && `Alarm×${nonTrips}`].filter(Boolean).join("+");
+      const countStr = parts ? `${parts} — ` : "";
+      koLines.push(`[${code}] ${countStr}${ALARM_ACTION_KO[code] || "점검 필요 — 제조사 문의"}.`);
+      enLines.push(`[${code}] ${countStr}${ALARM_ACTION_EN[code] || "Inspection required — contact manufacturer"}.`);
+    }
   }
 
-  if (parts.length > 0) {
-    data.ai_remarks    = parts;   // 배열로 저장
-    data.ai_remarks_en = partsEn;
+  // ─ [종합] ─────────────────────────────────────────────────
+  const status = (data.overall_status || "NORMAL").toUpperCase();
+  const tripCount = alarms.filter(a => (a.level || "").toLowerCase() === "trip").length;
+  if (status === "CRITICAL") {
+    koLines.push(`[종합] Trip ${tripCount}건 발생. 즉각적인 장비 점검이 필요합니다.`);
+    enLines.push(`[Summary] ${tripCount} trip event(s) detected. Immediate equipment inspection required.`);
+  } else if (status === "WARNING") {
+    koLines.push("[종합] 주의 필요 — 알람 내역 및 TRO 수치를 검토하시기 바랍니다.");
+    enLines.push("[Summary] Attention required — please review alarm records and TRO values.");
+  } else {
+    koLines.push("[종합] 이상 없음. 정상 운전 중입니다.");
+    enLines.push("[Summary] No issues detected. Normal operation.");
   }
+
+  data.ai_remarks    = koLines;
+  data.ai_remarks_en = enLines;
 }
 
 
@@ -922,8 +984,6 @@ export async function analyzePdfFromDrive(files, accessToken, vessel = {}) {
   const mainFiles  = filesByType.total.length ? filesByType.total
                    : filesByType.event.length ? filesByType.event
                    : filesByType.unknown;
-  const allIds     = normalizedFiles.map(f => f.id);
-
   // ── 모든 파일 사전 다운로드 ──────────────────────────────────
   const preloadedBlobs = new Map();
   for (const f of normalizedFiles) {
@@ -966,104 +1026,67 @@ export async function analyzePdfFromDrive(files, accessToken, vessel = {}) {
     } catch (e) { console.warn('[DataReport] 실패:', e.message); }
   }
 
-  // ③ Total / EventLog → extractTotalLogText (AI Stage 1 메인)
+  // ③ Total / EventLog → extractTotalLogText (pdf.js 텍스트 추출 — 페이지 수 무관)
   let totalLogExtraction = null;
   let totalLogFileId     = null;
   let totalLogError      = null;
+  let mainFilePages      = null;
   for (const f of mainFiles) {
     const blob = preloadedBlobs.get(f.id);
     if (!blob) continue;
     const { PDFDocument } = await import("pdf-lib");
-    const pageCount = (await PDFDocument.load(await blob.arrayBuffer(), { ignoreEncryption: true })).getPageCount();
-    if (pageCount > TOTAL_LOG_THRESHOLD) {
-      console.log(`[TOTAL LOG] ${f.name || f.id}: ${pageCount}p → pdf.js 추출`);
-      try {
-        totalLogExtraction = await extractTotalLogText(blob);
-        totalLogFileId     = f.id;
-        break;
-      } catch (e) {
-        totalLogError = e?.message || String(e) || "알 수 없는 오류";
-        console.warn("[TOTAL LOG] pdf.js 실패:", totalLogError, e);
-      }
+    mainFilePages = (await PDFDocument.load(await blob.arrayBuffer(), { ignoreEncryption: true })).getPageCount();
+    console.log(`[TOTAL LOG] ${f.name || f.id}: ${mainFilePages}p → pdf.js 추출`);
+    try {
+      totalLogExtraction = await extractTotalLogText(blob);
+      totalLogFileId     = f.id;
+      break;
+    } catch (e) {
+      totalLogError = e?.message || e?.name || String(e) || "알 수 없는 오류";
+      console.warn("[TOTAL LOG] pdf.js 실패:", totalLogError, e);
     }
   }
 
-  const ids = allIds;
-
-  // ── 분기: TOTAL LOG 텍스트 경로 vs 일반 PDF URI 경로 ──────────
-  let extractionParts;
-  let uris = [];
-  let splitInfo = null;
-
-  if (totalLogExtraction) {
-    // TOTAL LOG: 텍스트 기반 프롬프트 (PDF 첨부 없음)
-    const { text, totalPages, sections } = totalLogExtraction;
-    splitInfo = { totalPages, wasSplit: true, isTotalLog: true, sections };
-    extractionParts = [{ text: EXTRACTION_PROMPT_TOTALLOG(vessel, text, totalPages, sections) }];
-    console.log(`[Stage 1] TOTAL LOG 텍스트 모드: ${text.length}자`);
-  } else {
-    // 일반 PDF: 기존 URI 업로드 경로
-    uris = await Promise.all(ids.map((id) => getOrUploadFileUri(id, accessToken, preloadedBlobs.get(id))));
-    splitInfo = ids.reduce((acc, id) => {
-      const c = _fileUriCache.get(id);
-      if (c?.wasSplit) acc = { totalPages: c.totalPages, extractedPages: c.extractedPages, wasSplit: true, splitSections: c.splitSections };
-      return acc;
-    }, null);
-    extractionParts = [
-      { text: EXTRACTION_PROMPT(vessel, splitInfo) },
-      ...uris.map((uri) => ({ fileData: { mimeType: "application/pdf", fileUri: uri } })),
-    ];
+  // pdf.js 실패 또는 텍스트 너무 짧으면 Stage 0 데이터만으로 결과 구성 (AI 직독 없음)
+  if (!totalLogExtraction || (totalLogExtraction.text?.length ?? 0) < 200) {
+    const reason = mainFiles.length === 0
+      ? "Total Log 파일 없음"
+      : totalLogError
+        ? `pdf.js 추출 실패 (${mainFilePages ?? "?"}p): ${totalLogError}`
+        : `pdf.js 텍스트 너무 짧음 (${mainFilePages ?? "?"}p)`;
+    console.warn(`[Stage 1] 텍스트 추출 불가 — ${reason}. Stage 0 데이터만 사용.`);
+    const stage0Only = {
+      vessel_name:   vessel.name || null,
+      period:        null,
+      operations:    optimeOps  || [],
+      tro_data:      dataReportTro || { ballasting_avg: null, deballasting_max: null },
+      error_alarms:  [],
+      overall_status: null,
+      ai_remarks:    [],
+      ai_remarks_en: [],
+      _debug: {
+        totalLogFailed: true,
+        totalLogError:  totalLogError || null,
+        mainFilePages:  mainFilePages ?? null,
+        dataReportTro:  dataReportTro ?? null,
+        optimeOps:      optimeOps?.length ?? null,
+      },
+    };
+    return validateAndNormalizeResult(stage0Only, null);
   }
 
-  const makeExtractionParts = (uriList) => [
-    { text: EXTRACTION_PROMPT(vessel, splitInfo) },
-    ...uriList.map((uri) => ({ fileData: { mimeType: "application/pdf", fileUri: uri } })),
-  ];
+  // Stage 1: 텍스트 기반 추출 (pdf.js 추출 텍스트 → Gemini)
+  const { text, totalPages, sections } = totalLogExtraction;
+  const splitInfo = { totalPages, wasSplit: true, isTotalLog: true, sections };
+  const extractionParts = [{ text: EXTRACTION_PROMPT_TOTALLOG(vessel, text, totalPages, sections) }];
+  console.log(`[Stage 1] TOTAL LOG 텍스트 모드: ${text.length}자`);
 
-  // 3. 전체 실패 시 개별 시도 fallback 조건 (일반 경로 전용)
-  const shouldFallback = (e) =>
-    uris.length > 1 && (
-      e.message.includes("exceeds") ||
-      e.message.includes("500") ||
-      e.message.includes("파싱 실패") ||
-      e.name === "AbortError" ||
-      e.message.includes("aborted")
-    );
-
-  // Stage 1: 데이터 추출
   let extracted;
   try {
     extracted = await callGeminiRaw(extractionParts, 3, STAGE1_RESPONSE_SCHEMA);
   } catch (err) {
-    if (!shouldFallback(err)) throw err;
-    // 일반 PDF 경로에서만 개별 시도 fallback
-    console.warn("Stage 1 전체 묶음 실패, 개별 시도...", err.message);
-    for (const uri of uris) {
-      try {
-        extracted = await callGeminiRaw(makeExtractionParts([uri]), 3, STAGE1_RESPONSE_SCHEMA);
-        break;
-      } catch (innerErr) {
-        console.warn("Stage 1 개별 실패, 다음...", innerErr.message);
-        if (!innerErr.message.includes("exceeds")) throw innerErr;
-      }
-    }
-    if (!extracted) {
-      const pageNote = splitInfo?.totalPages
-        ? `원본 ${splitInfo.totalPages}페이지 TOTAL LOG — 페이지 과다로 자동 분할 후에도 분석 실패. 파일을 섹션별로 분리하여 재업로드해주세요.`
-        : "PDF 페이지 과다 또는 파일 오류로 분析 불가. 파일을 섹션별로 분리하여 재업로드해주세요.";
-      return validateAndNormalizeResult({
-        vessel_name: vessel.name || null,
-        period: null,
-        operations: [],
-        tro_data: { ballasting_avg: null, deballasting_max: null },
-        error_alarms: [],
-        overall_status: "WARNING",
-        ai_remarks: [pageNote],
-        ai_remarks_en: [splitInfo?.totalPages
-          ? `Original ${splitInfo.totalPages}-page TOTAL LOG — analysis failed even after auto-split. Please upload sections as separate files.`
-          : "PDF too large or file error — analysis unavailable. Please upload sections as separate files."],
-      });
-    }
+    console.warn("[Stage 1] 텍스트 모드 실패, Stage 0 데이터로 대체:", err.message);
+    extracted = { vessel_name: vessel.name || null, period: null, operations: [], tro_data: {}, error_alarms: [] };
   }
 
   // Stage 0 오버라이드 (프로그래밍 파싱이 AI보다 정확)
@@ -1127,8 +1150,9 @@ export async function analyzePdfFromDrive(files, accessToken, vessel = {}) {
   }
 
   // 진단 패널용 _debug 조립 (관리자 전용 표시 — 항상 기록)
-  extracted._debug = totalLogExtraction ? {
+  extracted._debug = {
     totalPages:    totalLogExtraction.totalPages,
+    mainFilePages: mainFilePages ?? null,
     isTotalReport: totalLogExtraction.isTotalReport ?? false,
     sections:      totalLogExtraction.sections,
     headerText:    totalLogExtraction.headerText ?? null,
@@ -1136,27 +1160,10 @@ export async function analyzePdfFromDrive(files, accessToken, vessel = {}) {
     dataReportTro: dataReportTro ?? null,
     optimeOps:     optimeOps?.length ?? null,
     aiTroData:     _aiTroSnapshot,
-  } : {
-    totalLogFailed: true,
-    totalLogError:  totalLogError || "알 수 없는 오류",
-    aiTroData:      _aiTroSnapshot,   // 일반 Gemini 경로에서 뽑아낸 AI Stage 1 결과
-    dataReportTro:  dataReportTro ?? null,
-    optimeOps:      optimeOps?.length ?? null,
   };
 
-  // Stage 2: 분析/판정/remarks (JSON만, PDF 없음)
-  const analysisParts = [{ text: ANALYSIS_PROMPT(vessel, extracted) }];
-  let analyzed;
-  try {
-    analyzed = await callGeminiRaw(analysisParts, 3, STAGE2_RESPONSE_SCHEMA);
-  } catch (err) {
-    console.warn("Stage 2 실패, 기본값으로 후처리 진행:", err.message);
-    analyzed = { overall_status: null, ai_remarks: "", ai_remarks_en: "" };
-  }
-
-  // Stage 1 + Stage 2 결합 후 후처리 (TOTAL LOG sections 전달)
-  const sections = totalLogExtraction?.sections ?? null;
-  return validateAndNormalizeResult({ ...extracted, ...analyzed }, sections);
+  // Stage 2 제거 — recalcOverallStatus + autoFillRemarks가 내부에서 처리
+  return validateAndNormalizeResult(extracted, totalLogExtraction.sections ?? null);
 }
 
 /**
