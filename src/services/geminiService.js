@@ -1067,7 +1067,7 @@ export async function analyzePdfFromDrive(files, accessToken, vessel = {}) {
 
   if (totalLogExtraction?.stage0) {
     const s0 = totalLogExtraction.stage0;
-    if (s0.operations !== null) {
+    if (s0.operations !== null && s0.operations.length > 0) {
       console.log('[Stage0 Override] operations:', s0.operations.length, '건');
       extracted.operations = s0.operations;
     }

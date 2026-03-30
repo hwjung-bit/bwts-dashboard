@@ -305,9 +305,12 @@ export function parseOpTimeLog(rows, debug = null) {
     // 전체 행 텍스트로 운전 종류 판별 (가장 확실한 방법)
     const allText = cells.map(c => c.str).join(' ').toUpperCase();
     const isBallast   = (/\bBALLAST\b/.test(allText) && !/\bDE.?BALLAST\b/.test(allText))
-                     || /\bN-B\b/.test(allText);
-    const isDeballast = /\bDE.?BALLAST\b/.test(allText) || /\bN-D\b/.test(allText);
-    const isStripping = /\bSTRIPP/i.test(allText) || /\bN-S\b/.test(allText);
+                     || /\bN-B\b/.test(allText)
+                     || /\b[12]-B\b/i.test(allText);
+    const isDeballast = /\bDE.?BALLAST\b/.test(allText) || /\bN-D\b/.test(allText)
+                     || /\b[12]-D\b/i.test(allText);
+    const isStripping = /\bSTRIPP/i.test(allText) || /\bN-S\b/.test(allText)
+                     || /\b[12]-S\b/i.test(allText);
     if (!isBallast && !isDeballast && !isStripping) continue;
 
     const mode = isBallast ? 'BALLAST' : isDeballast ? 'DEBALLAST' : 'STRIPPING';
