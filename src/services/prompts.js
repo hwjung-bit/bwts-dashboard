@@ -258,51 +258,281 @@ ${STAGE1_TEXT_SCHEMA}
 
 // ── TOTAL LOG 전용 텍스트 기반 추출 프롬프트 ─────────────────
 export const EXTRACTION_PROMPT_TOTALLOG = (vessel = {}, extractedText = "", totalPages = 0, sections = null) => `
-당신은 선박평형수처리장치(BWTS) 로그 데이터 추출 전문가입니다.
-아래 텍스트는 TOTAL LOG PDF(원본 ${totalPages}페이지)에서 핵심 섹션만 추출한 내용입니다.
-숫자·날짜·코드만 있는 그대로 추출하고 해석하거나 판단하지 마세요.
-JSON 외의 텍스트는 절대 포함하지 마세요.
-
-[동적 파싱 원칙] ← 반드시 준수
-선박·장비 옵션에 따라 표의 센서 구성(TRO1, TRO2, FMU1, CSU 등)이 달라지므로 열 순서를 고정하거나 추측하지 마세요.
-각 표에서 첫 번째 줄(영문 대문자 항목)을 기준 헤더로 먼저 파악한 뒤, 줄바꿈·여백 기준으로 데이터를 헤더와 짝지으세요.
-PDF 텍스트가 표 형식이 깨져 나열되더라도 지능적으로 열·행을 복원하여 읽을 것.
+당신은 Techcross ECS BWTS(선박평형수처리장치) 로그 데이터 파싱 전문가입니다.
+아래 텍스트는 TOTAL LOG PDF(원본 ${totalPages}페이지)에서 추출한 내용입니다.
+숫자·날짜·코드만 있는 그대로 추출하고, 절대 해석하거나 판단하지 마세요.
+최종 출력은 JSON 단독. JSON 외 텍스트(설명, 주석, 마크다운 코드블록 포함) 절대 금지.
 
 [장비 정보]
 - 선명: ${vessel.name || "미상"}
-- BWTS 제조사: ${vessel.manufacturer || "Techcross"}
-- BWTS 모델: ${vessel.model || "ECS"}
+- BWTS 제조사: Techcross
+- BWTS 모델: ECS
 
-[텍스트 구성]
-${sections?.op_time_start
-  ? `- p.1~5: 기본 정보\n- p.${sections.op_time_start}~: ECS Operation Time Log (운전 기록 기준표)\n- p.${sections.data_log_start ?? "?"}~: ECS Data Log (TRO 수치)\n- Operation Event Log 샘플 포함`
-  : "- p.1~5: 기본 정보\n- 뒤 50페이지: Op Time + Data Log 추정 구간\n- Operation Event Log 샘플 포함"}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+§0. 사전 점검 — 텍스트 수신 즉시 수행
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-[추출 순서 — 반드시 준수]
-Step 1. 기본 정보: 선명, IMO 번호, 제조사, 분析 기간
-Step 2. ECS Operation Time Log 섹션에서 각 운전(BALLAST/DEBALLAST/STRIPPING) 추출 (최대 30건)
-  - 컬럼: OPERATION │ START TIME │ END TIME │ RUNNING TIME │ POSITION(GPS) │ VOLUME
-  - RUNNING TIME HH:MM → 소수 시간(hour) 변환 (예: 0:34 → 0.57)
-  - ⚠️ 존재하지 않는 날짜(비윤년 2월 29일, 4월 31일 등) 추출 금지
-  - ⚠️ 운전 횟수는 반드시 이 Operation Time Log 기록만 기준. 기록 없으면 operations = []
-  - ⚠️ Data Log OPERATION 컬럼 상태값이나 Event Log Start/Stop 이벤트는 운전 횟수 카운트에 절대 사용 금지
-  - ⚠️ 비정상 종료(ECS terminated in the wrong way 등)로 완료 기록 없는 운전은 포함 금지
-Step 3. ECS Data Log 섹션에서 TRO + ECU/FMU 평균 계산 (TRO 수치 전용 — 운전 횟수 산정 불가)
-  - 헤더 행(INDEX TIME OPERATION ... 형식)을 먼저 읽어 컬럼 식별
-  - TRO 컬럼: 이름에 "TRO" 포함 (TRO_B1/B2=주입, TRO_D1/S1=배출, TRO1/T1=주입, TRO2/T2=배출)
-    값 범위 0~15 ppm만 유효. 수십~수천 단위(전압/전류)는 절대 TRO로 오인 금지
-  - OPERATION 컬럼이 있으면: BALLAST/N-B 행 → ballasting_avg, DEBALLAST/N-D 행 → deballasting_max (최댓값, TRO 계산에만 사용)
-  - 단속 운전(반복 STOP/START)은 전체 BALLAST 행 합산 평균. 10분 미만 단속 운전은 안정구간 필터 미적용
-  - OPERATION 컬럼 없으면: Step2 시작~종료 시간 기준, 앞뒤 10분 제외 안정 구간 평균
+[P-0] 텍스트 유효성 확인
+추출 텍스트 전체 길이가 200자 미만이거나 의미 있는 숫자·날짜가 없으면:
+→ {"parse_status":"NO_DATA","reason":"텍스트 부족 — 별도 파일 또는 다른 페이지 확인 필요","vessel":null,"operations":[],"tro":null,"events":[]}
+반환 후 즉시 종료.
+
+[P-1] 파일 구조 자동 판별 — 섹션 헤더를 순서 무관하게 탐색
+- Operation Time Log 헤더 패턴 (대소문자 무시):
+  "ECS Operation Time Log" | "ECS Operation Time" | "Operation Time Record"
+  | "BALLAST OPERATION LOG" | "운전시간" | "운전기록" | "Op_Time" | "OPERATION TIME"
+  → 발견 위치를 op_section_start로 기록
+
+- Data Log 헤더 패턴:
+  "ECS Data Log" | "ECS DATA" | "Data Report" | "DataReport" | "DATA LOG"
+  → 판별 조건: "INDEX" + "TIME" 패턴 필수. 발견 위치를 data_section_start로 기록
+
+- Event Log 헤더 패턴:
+  "ECS Operation Log Display" | "Operation Event Log" | "Event Log"
+  | "EVENT LOG" | "ALARM LOG" | "이벤트로그"
+
+어느 섹션이든 헤더가 없으면 해당 섹션 = null 처리(오류 아님).
+변수 ${sections?.op_time_start ?? "?"}, ${sections?.data_log_start ?? "?"}는 힌트일 뿐 — 실제 헤더 위치가 우선.
+일부 선박은 파일이 분리됨(Op Time Log 별도 / Data Report 별도 / Event Log 별도) → 입력된 extractedText에서 각 섹션을 독립적으로 탐색.
+
+[P-1-EXT] Data Log OPERATION 컬럼 부재 시 폴백
+Data Log에서 OPERATION 컬럼이 없거나 모든 행의 OPERATION값이 공란인 경우:
+  Step1: Op Time Log의 각 운전 행 START~END 시간 범위와 Data Log 타임스탬프를 교차 조회하여 모드 역추론.
+         예) Op Time Log에서 2025-05-02 00:48~01:04가 BALLAST이면 해당 시간대 Data Log 포인트 → BALLAST 처리.
+  Step2: Op Time Log도 없으면 Event Log의 "Ballast Start/Stop", "Deballast Start/Stop" 이벤트로 시간 구간 재구성.
+  Step3: 양쪽 모두 없으면 operation="UNKNOWN", tro_mode_inference="failed", 해당 구간 TRO 집계 제외 후 경고 플래그.
+  해당 경우 반드시 "operation_column_missing":true 플래그 추가.
+
+[P-2] 헤더 반복 행 제거
+페이지 넘김 시 동일 헤더 행(OPERATION, START TIME, END TIME, INDEX, TIME 등 영문 대문자 나열)이 반복 삽입됨.
+데이터 파싱 전 이 반복 헤더 행을 모두 제거하고 시작할 것.
+
+단위 표기 행 탐지: 헤더 행 직후에 오는 행이 순수 계측단위만으로 구성된 경우(예: "V A - PSU m³/h °C % ppm ppm ppm")
+→ 해당 행은 데이터 행에서 제외하고 unit_map으로 저장.
+  예) unit_map["REC1_CURRENT"]="A", unit_map["TRO_B1"]="ppm", unit_map["CSU1"]="PSU"
+
+요약 행 제거: "TOTAL TIME :", "BALLAST TIME :", "DEBALLAST TIME :" 패턴 포함 행은
+통계 텍스트이므로 데이터 행에서 제외.
+
+[P-3] 표 깨짐 복원 규칙
+PDF 텍스트 추출로 표 구조가 깨져 값이 한 줄 나열된 경우, 아래 패턴으로 컬럼 복원:
+- 운전 모드: BALLAST|DEBALLAST|STRIPPING|BYPASS|N-B|N-D|1-B|2-B|1-D|2-D
+              EM'CY BYPASS|EMCY BYPASS|EMERGENCY BYPASS
+- 날짜시간: \\d{2,4}[-./]\\d{1,2}[-./]\\d{1,2}\\s+\\d{1,2}:\\d{2}(:\\d{2})?
+- GPS (구형 포맷): \\d{1,3}°\\d{0,2}[NS]\\s+\\d{1,3}°\\d{0,2}[EW]
+  GPS (신형 포맷): \\[\\d{1,3},\\s*\\d{1,2}\\.\\d{2},\\s*[NS]\\]\\[\\d{1,3},\\s*\\d{2}\\.\\d{2},\\s*[EW]\\]
+- 러닝타임: \\d{1,3}:\\d{2} (HH:MM)
+- VOLUME: 마지막 독립 소수 숫자 (0.00은 null 처리 권고)
+예: "BALLAST 2025-05-02 00:48:04 2025-05-02 01:04:10 0:16 [22,27.94,N][113,52.54,E] 162.00"
+→ OPERATION=BALLAST, START=2025-05-02 00:48, END=2025-05-02 01:04, RUNNING=0:16, VOLUME=162.00
+
+헤더 없는 표 복원 순서 (위치 기반):
+  1순위: 모드 키워드 → OPERATION
+  2순위: 첫 번째 날짜시간 → START TIME
+  3순위: 두 번째 날짜시간 → END TIME
+  4순위: HH:MM(날짜 이후) → RUNNING TIME
+  5순위: GPS 패턴 → POSITION
+  6순위: 마지막 독립 소수 → VOLUME
+  모드 미탐지 시 operation="UNKNOWN", "header_missing":true, 추정 실패 행 → "header_parse_failed_rows":[행번호]
+
+알람 행 복합 처리:
+  단일 행에서 [CODExxx] 패턴 2개 이상 → 각각 행 분리, 동일 타임스탬프, "row_split":true
+  LEVEL = "Alarm Trip" 또는 "Trip Alarm" → 두 이벤트로 분리, raw_level에 원본 보존
+
+[P-4] 날짜 포맷 처리 — 우선순위 순
+내부 표현은 항상 YYYY-MM-DD HH:MM으로 통일:
+  ① YYYY-MM-DD HH:MM[:SS]
+  ② YYYY-M-D H:MM[:SS] — 한 자리 월/일/시 (예: 2025-5-2 0:48 → 2025-05-02 00:48)
+  ③ YY-MM-DD HH:MM[:SS] — 00~30 → 20xx, 31~99 → 19xx
+  ④ YYYY.MM.DD HH:MM[:SS]
+  ⑤ DD/MM/YYYY HH:MM[:SS] — 앞자리 ≥13이면 DD/MM 확정. 1~12이면 문서 내 다른 날짜 참조 후 불확실하면 date_format_ambiguous:true
+  ⑥ 초(SS) 변형 모두 허용
+존재하지 않는 날짜 → 해당 행 건너뜀.
+
+시간 역전 행 처리:
+  END TIME < START TIME이고 RUNNING TIME=0:00, VOLUME=0.00 → 더미 행, operations에서 제외, "time_reversal_skipped":true
+  END TIME < START TIME이고 RUNNING TIME > 0:00 → 포함, "time_reversal_warning":true, 원본값 보존
+
+[P-5] 한글 컬럼명·값 매핑 (구형 장비)
+컬럼명: "운전모드"→OPERATION, "시작시간"→START TIME, "종료시간"→END TIME,
+        "운전시간"→RUNNING TIME, "처리량"→VOLUME, "위치"→POSITION
+모드값: "주입"/"밸러스트"→BALLAST, "배출"/"디밸러스트"/"탈밸러스트"→DEBALLAST,
+        "잔류배출"/"스트리핑"→STRIPPING
+(컬럼명 매핑은 헤더 행에만, 셀 값 매핑은 데이터 행에만 적용)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+§1. BWTS 도메인 상수 — 파싱 판단 기준 (수정 금지)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+[D-1] 파라미터별 유효 범위 및 이상 기준
+┌────────────────┬───────────────┬───────────────────────────────────┬─────────────────────────────────┐
+│ 항목           │ 단위          │ 정상 범위                         │ 이상 기준                       │
+├────────────────┼───────────────┼───────────────────────────────────┼─────────────────────────────────┤
+│ TRO (전 구간)  │ ppm = mg/L    │ 0 ~ 15 (초과 → TRO 아님)          │ 모드별 상이 (D-2 참조)          │
+│ ECU 전류       │ A             │ 100 ~ 4000 (대용량 모델 포함)     │ CODE405: 장비 허용치 초과       │
+│ 입력 전압      │ V             │ 396 ~ 484 V (440±10%)             │ CODE407: >506V / CODE406: 저전압│
+│ FMU 유량       │ m³/h          │ 양수                              │ CODE605: >110%, CODE606: <15%   │
+│ ECU 압력       │ bar           │ 0 ~ 4.5                           │ CODE100: >4.5 bar               │
+│ ECU 온도       │ °C            │ 0 ~ 45                            │ CODE100: >45°C                  │
+│ 냉각수 온도    │ °C            │ 0 ~ 38                            │ CODE603: >43°C Alarm, >45 Fault │
+│ H2 가스        │ % LEL         │ 0 ~ 100                           │ >25 → Alarm, >50 → Shutdown     │
+│ 염도(CSU)      │ PSU 또는 mS/cm│ 0 ~ 40                            │ BALLAST 중 <1.0 → Alarm         │
+│ VOLUME         │ m³            │ 양수                              │ 없으면 null (0으로 채우지 말것) │
+│ REC1_VOLTAGE   │ 내부 상태코드 │ 1 ~ 8 정수 (장비 내부값)          │ TRO/전압(V)으로 절대 오인 금지  │
+│ 해수 온도(S.W) │ °C            │ -2 ~ 35                           │ CODE600: 저온 이상              │
+└────────────────┴───────────────┴───────────────────────────────────┴─────────────────────────────────┘
+
+⚠️ ppm = mg/L: 완전히 동일한 단위. 이중 기준 적용 절대 금지.
+⚠️ ECU 전류 3,000A 초과(최대 4,000A)는 대용량 모델의 정상 운전값일 수 있음 — 고정 상한선으로 이상 판정 금지.
+⚠️ REC1_VOLTAGE = 단일 정수(1~8)이면 전압(V)이 아닌 장비 내부 탭 상태값. TRO 및 전압 계산에서 완전 제외.
+⚠️ ECU 압력(0~4.5 bar)과 TRO(0~15 ppm)는 수치 범위 중복 가능 → 컬럼 헤더로만 판별.
+⚠️ CSU: unit_map에 "PSU" 명시 시 PSU 처리. 미명시 시 csu_unit_unknown:true, 변환 금지.
+⚠️ CODE406(저전압)은 314~316V 등 기준서 임계값(396V)보다 훨씬 낮은 수치에서도 발생 가능 — 고정 임계값 이상 판정 금지, 로그의 LEVEL 필드 우선.
+
+[D-2] TRO 모드별 기준값 — 절대 혼동 금지
+┌────────────────────┬──────────────────────────────────┬────────────────────────────────────┐
+│ 모드               │ 컬럼 역할                        │ 정상 범위 / 이상 기준              │
+├────────────────────┼──────────────────────────────────┼────────────────────────────────────┤
+│ BALLAST / N-B      │ TRO_B1, TRO_B2, TRO1, T1, TRO   │ 6~10 ppm 정상                      │
+│ Data Log: 1-B      │ (주입 측)                        │ <5 → Low Alarm (CODE200)           │
+│                    │                                  │ >10 → High Alarm (CODE201)         │
+├────────────────────┼──────────────────────────────────┼────────────────────────────────────┤
+│ DEBALLAST / N-D    │ TRO_D1, TRO_S1, TRO2, T2        │ IMO: <=0.1 ppm                     │
+│ STRIPPING          │ (배출 측)                        │ USCG: <=0.07 ppm                   │
+│ Data Log: 1-D, 1-S │                                  │ >0.1 → Alarm/Fault                 │
+└────────────────────┴──────────────────────────────────┴────────────────────────────────────┘
+
+Data Log OPERATION 컬럼 값 매핑:
+  "1-B" / "2-B" → BALLAST,  "1-D" / "2-D" → DEBALLAST,  "1-S" / "S" → STRIPPING
+  "0" → STOP (TRO 계산 제외)
+
+▸ 필드 배정 규칙 (혼동 절대 금지):
+  - ballasting_avg   = BALLAST 구간 TRO 주입값의 산술 평균 (최댓값 아님)
+  - deballasting_max = DEBALLAST/STRIPPING 구간 TRO 배출값의 최댓값 (평균 아님)
+
+▸ TRO 알람 판정 우선순위: 로그에 기록된 LEVEL 필드(Trip/Alarm/Warning) 최우선 신뢰.
+  고정 수치 임계값은 보조 참고용. 예) CODE201이 0.12에서 Trip, 1.28에서 Alarm 등 동일 코드도 수치별 심각도 다를 수 있음.
+
+▸ TRO Warm-up 유예 구간:
+  Ballasting 운전 개시 직후 초기 구간(운전 시작 후 10분 이내 또는 첫 5개 데이터 행)은
+  TRO_B1이 0~5 ppm이더라도 Low Alarm 판정 제외. warm_up_excluded:true 플래그 추가.
+
+▸ 음수 TRO: tro 필드 null, tro_sensor_err:true, tro_raw:[원시값]
+▸ TRO 단위 누락: 값 추출 후 tro_unit_missing:true. 추정·변환 금지.
+▸ TRO 0~1.5 집중 분포 → tro_scale_warning:true (×10 스케일 의심)
+
+[D-3] 운전 모드 전체 목록
+- BALLAST, N-B, 1-B, 2-B : TRO 주입 기준 적용
+- DEBALLAST, N-D, 1-D, 2-D : TRO 배출 기준 적용
+- STRIPPING, 1-S : DEBALLAST와 동일 기준, deballasting_max에 포함
+- EM'CY BYPASS, EMCY BYPASS, BYPASS, Emergency : 운전 카운트 제외, TRO 판정 미적용
+- STOP, 0 : TRO 계산 제외
+- 미지 모드 : operation_mode 원본값 그대로, tro_judgment:"UNKNOWN_MODE"
+
+[D-4] 알람 코드 — 동적 추출 (Whitelist 방식 금지)
+알람 코드는 \\[CODE\\d+\\] 정규식으로 모두 추출. 기준서에 없는 코드도 그대로 기록.
+
+알람 코드 형식: [CODE402] 또는 [CODE 402] (공백 유무 혼용) → 동일 처리
+CODE100 세부 원인: 설명 문자열 내 괄호/대괄호로 sub-fault 및 대상 모듈 명시됨.
+  예) "[CODE100](PRU Fault 50 Percent)[PRU1]" → code:"CODE100", sub_fault:"PRU Fault 50 Percent", module:"PRU1"
+  추출 패턴: \\((.*?)\\) 및 \\[(.*?)\\] (CODE 번호 이후 첫 번째 괄호 쌍)
+
+주요 확인 코드 (참고용, 이 목록 외 코드도 추출):
+CODE100(ECU EMCY), CODE200(TRO Low), CODE201(TRO High),
+CODE301(ANU Level INI), CODE303(ANU Level High),
+CODE402(440V MC Fail), CODE405(전류 High), CODE406(전압 Low), CODE407(전압 High),
+CODE600(S.W TEMP Low), CODE603(F.W TEMP High),
+CODE605(FMU Flow High), CODE606(FMU Flow Low),
+CODE701(통신 Fail), CODE703(센서 통신 에러), CODE704(Bypass Valve),
+CODE706(EM'CY Mode), CODE731(밸브 이상 종료), CODE774(냉각수 밸브)
+
+ACK.TIME, RESET TIME의 "-" → null 변환
+
+[D-5] Event Log 특수 처리 규칙
+① LEVEL = Normal인 비정상 종료:
+   DESCRIPTION에 "ECS was terminated in the wrong way" 포함 시 → LEVEL 값과 무관하게
+   termination_type:"ABNORMAL", 해당 운전 행을 operations에서 제외 대상으로 플래그.
+
+② 종료 주체 추출:
+   DESCRIPTION 끝에 "By ECS-Server" → termination_type:"AUTO"
+   "By Abnormal" → termination_type:"ERROR"
+   그 외 또는 없음 → termination_type:"MANUAL"
+
+③ CLEARED 컬럼:
+   "O" 또는 공란 → 미처리/해당없음 (정상값)
+   "X" → 완료/해제됨 (정상값, 오류 아님)
+
+④ DEVICE 컬럼: 사전 목록에 제한 없이 원본값 그대로 추출.
+   (VV1~8, PUMP1~2, IV1, OV1, REC1~2, RTU1, AIM1, GDS1, STS1, FW01V 등 모두 유효)
+
+⑤ Operation Time Log 기타 컬럼:
+   "Line" 컬럼 (값이 "1" 등 고정값) → 파싱 시 무시 또는 메타데이터로만 저장.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+§2. 동적 파싱 원칙
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+선박·장비 옵션에 따라 표의 센서 구성이 달라지므로 열 순서를 고정하거나 추측하지 마세요.
+각 표에서 영문 대문자 항목 줄을 기준 헤더로 먼저 파악한 뒤 데이터를 헤더와 짝지으세요.
+
+절대 금지:
+- 확인 불가 항목 추측·보정
+- 단위 임의 변환
+- VOLUME 0.00을 유효 데이터로 집계 (null 처리)
+- 로그에 없는 알람 코드 추가 또는 삭제
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+§3. 추출 단계 — 순서 엄수
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+[Step 1] 기본 정보
+선명, IMO 번호, BWTS 제조사/모델, 분석 기간 추출.
+
+[Step 2] ECS Operation Time Log → operations 배열 (최대 30건)
+- §0 P-1에서 찾은 op_section_start 기준으로 섹션 파싱
+- 컬럼: OPERATION | START TIME | END TIME | RUNNING TIME | POSITION(GPS) | VOLUME
+- RUNNING TIME HH:MM → 소수 시간(hour) 변환 (예: 0:34 → 0.57h)
+- VOLUME 컬럼 없거나 공란이거나 0.00 → null
+- "Line" 컬럼 등 메타 컬럼 무시
+
+⚠️ 운전 횟수 카운트 규칙:
+  - 유일한 기준: Operation Time Log 완료 운전 행 (START TIME + END TIME 모두 있는 것)
+  - Data Log OPERATION 컬럼 상태값 → 카운트 사용 절대 금지
+  - Event Log Start/Stop 이벤트 → 카운트 사용 절대 금지
+  - 비정상 종료 (END TIME 없음 또는 "ECS terminated in the wrong way") → 제외
+  - EM'CY BYPASS 모드 → 제외
+  - 기록 없으면 operations = []
+
+[Step 3] ECS Data Log → tro, ecu_current_avg, fmu_flow_avg, anu_status
+- data_section_start 기준 섹션 파싱
+- 헤더 행(INDEX TIME OPERATION ...) 먼저 읽어 컬럼 식별
+- unit_map 저장 (헤더 직후 단위 행 있을 경우)
+
+TRO 컬럼 식별:
+  - 컬럼명에 "TRO" 포함 + 값 0~15 ppm 범위 → TRO 유효
+  - 수십~수천 단위(전류/전압) → TRO 절대 오인 금지
+
+TRO 계산:
+  - OPERATION 있으면: BALLAST/1-B 행 → ballasting_avg, DEBALLAST/1-D 행 → deballasting_max
+  - OPERATION 없으면: [P-1-EXT] 폴백 적용
+  - 단속 운전(반복 STOP/START): 전체 BALLAST 행 합산 평균. 10분 미만 단속은 안정 필터 미적용
+  - Warm-up 유예 구간(개시 후 10분/5행): ballasting_avg 계산에서 제외
   - 안정 구간 0개 또는 운전 20분 이하 → null
-  - ECU 전류: REC1_CURRENT, REC_I, CURRENT, ECU_I 등 수백~수천A → ecu_current_avg
-  - 유량: FMU1, FMU, FLOW 등 (FMU_ST 제외) → fmu_flow_avg
-  - ANU: ANU_D1, ANU_S1 등 숫자값 — 0이면 'Standby', 양수이면 'Operating' → anu_status
-Step 4. Operation Event Log 샘플에서 Trip·Alarm 선별 추출
-  - Trip 전부, 동일 코드 Alarm 최대 5건 (총 60건 이하)
-  - VRCS 채터링(특정 밸브 수초 간격 Opened/Closed 반복): VRCS_ERR 1건으로 병합
-  - LOG_OVERFLOW: 총 항목 100건 초과 감지 시 추가
-  - ⚠️ 샘플 구간 외에는 추출 시도 불필요
+
+기타:
+  - ECU 전류: REC1_CURRENT, REC_I, CURRENT, ECU_I → ecu_current_avg
+  - 유량: FMU1, FMU, FLOW (FMU_ST 제외) → fmu_flow_avg
+  - ANU: ANU_D1, ANU_S1 → 0=Standby, 양수=Operating → anu_status
+  - H2: H2_GAS, H2, GAS_LEL → h2_gas_avg (% LEL)
+
+[Step 4] Operation Event Log → events 배열 (샘플 구간만)
+- Trip 전부, 동일 코드 Alarm 최대 5건 (총 60건 이하)
+- Normal 레벨 이벤트는 포함하지 않음
+  단, DESCRIPTION에 "terminated in the wrong way" 포함 시 LEVEL 무관하게 포함
+- VRCS 채터링(특정 밸브 수초 간격 반복) → VRCS_ERR 1건으로 병합
+- LOG_OVERFLOW: 총 항목 100건 초과 시 플래그 추가
+- Event Log 수백 페이지 이상 → 마지막 100건만 샘플링
+- 각 이벤트에 termination_type 및 CLEARED 값 포함 (D-5 규칙 적용)
 
 [확인 불가 항목은 null. 문자열 값에 줄바꿈 포함 금지]
 
