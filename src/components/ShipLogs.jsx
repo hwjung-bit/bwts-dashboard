@@ -49,7 +49,7 @@ function StatusCell({ status }) {
   );
 }
 
-export default function ShipLogs({ vessels, accessToken }) {
+export default function ShipLogs({ vessels, accessToken, isAdmin }) {
   const [year, setYear] = useState(String(CURRENT_YEAR));
 
   // CSV 변환 상태
@@ -271,8 +271,8 @@ export default function ShipLogs({ vessels, accessToken }) {
                       {monthSummary[m - 1]}척
                     </div>
                   )}
-                  {/* CSV 변환 버튼 */}
-                  {accessToken && (
+                  {/* CSV 변환 버튼 (관리자 전용) */}
+                  {accessToken && isAdmin && (
                     <button
                       onClick={() => handleConvertMonth(m)}
                       disabled={converting}
