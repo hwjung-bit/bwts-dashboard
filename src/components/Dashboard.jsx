@@ -197,9 +197,13 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
         const current = monthlyData[vessel.id]?.analysisStatus;
         const analyzed = ["NORMAL", "WARNING", "CRITICAL", "REVIEWED"].includes(current);
         if (!analyzed) {
+          const csvCount = entry?.csvFiles?.length ?? 0;
+          const pdfCount = entry?.pdfs?.length ?? 0;
           updateMonthlyVessel(vessel.id, {
             analysisStatus: hasPdfs ? "RECEIVED" : "NO_DATA",
-            pdfCount: hasPdfs ? (entry.csvFiles?.length || entry.pdfs.length) : 0,
+            pdfCount: hasPdfs ? (csvCount || pdfCount) : 0,
+            hasCsv: csvCount > 0,
+            hasPdf: pdfCount > 0,
           });
         }
         if (entry) matchedFolders.push({ vesselName: vessel.name, folderName: entry.vesselFolderName, pdfs: entry.pdfs.length, csvs: entry.csvFiles?.length ?? 0 });

@@ -32,7 +32,7 @@ const STATUS_CELL = {
   NO_DATA:  { label: "—", cls: "bg-slate-50 text-slate-300 border-slate-100", dot: null },
 };
 
-function StatusCell({ status }) {
+function StatusCell({ status, hasCsv, hasPdf }) {
   const s = STATUS_CELL[status] || STATUS_CELL.NO_DATA;
   if (status === "NO_DATA") {
     return (
@@ -42,9 +42,17 @@ function StatusCell({ status }) {
     );
   }
   return (
-    <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-[11px] font-semibold ${s.cls}`}>
-      {s.dot && <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${s.dot}`} />}
-      {s.label}
+    <div className="flex flex-col items-center gap-0.5">
+      <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-[11px] font-semibold ${s.cls}`}>
+        {s.dot && <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${s.dot}`} />}
+        {s.label}
+      </div>
+      {(hasPdf || hasCsv) && (
+        <div className="flex gap-1">
+          {hasPdf && <span className="text-[9px] px-1 rounded bg-orange-50 text-orange-400 border border-orange-100">PDF</span>}
+          {hasCsv && <span className="text-[9px] px-1 rounded bg-green-50 text-green-500 border border-green-100">CSV</span>}
+        </div>
+      )}
     </div>
   );
 }
@@ -65,16 +73,20 @@ export default function ShipLogs({ vessels, accessToken, isAdmin }) {
     vessel: v,
     months: MONTHS.map((_, idx) => {
       const data = allMonthData[idx];
-      return data[v.id]?.analysisStatus || "NO_DATA";
+      const entry = data[v.id] || {};
+      return {
+        status: entry.analysisStatus || "NO_DATA",
+        hasCsv: entry.hasCsv || false,
+        hasPdf: entry.hasPdf || false,
+      };
     }),
   }));
 
   const monthSummary = MONTHS.map((_, idx) => {
     const data = allMonthData[idx];
-    const received = Object.values(data).filter(
-      (d) => d?.analysisStatus && d.analysisStatus !== "NO_DATA"
-    ).length;
-    return received;
+    const entries = Object.values(data).filter(d => d?.analysisStatus && d.analysisStatus !== "NO_DATA");
+    const csvCount = entries.filter(d => d.hasCsv).length;
+    return { received: entries.length, csvCount };
   });
 
   // ── CSV 변환 핸들러 ─────────────────────────────────────────
@@ -266,9 +278,12 @@ export default function ShipLogs({ vessels, accessToken, isAdmin }) {
               {MONTHS.map((m) => (
                 <th key={m} className="px-2 py-3 text-center text-[11px] font-bold text-slate-400 uppercase tracking-wider min-w-[70px]">
                   <div>{m}월</div>
-                  {monthSummary[m - 1] > 0 && (
+                  {monthSummary[m - 1].received > 0 && (
                     <div className="text-[10px] font-normal text-slate-300 mt-0.5">
-                      {monthSummary[m - 1]}척
+                      {monthSummary[m - 1].received}척
+                      {monthSummary[m - 1].csvCount > 0 && (
+                        <span className="text-green-400 ml-0.5">(CSV {monthSummary[m - 1].csvCount})</span>
+                      )}
                     </div>
                   )}
                   {/* CSV 변환 버튼 (관리자 전용) */}
@@ -305,10 +320,10 @@ export default function ShipLogs({ vessels, accessToken, isAdmin }) {
                   </div>
                 </td>
 
-                {months.map((status, idx) => (
+                {months.map((cell, idx) => (
                   <td key={idx} className="px-2 py-3 text-center">
                     <div className="flex items-center justify-center">
-                      <StatusCell status={status} />
+                      <StatusCell status={cell.status} hasCsv={cell.hasCsv} hasPdf={cell.hasPdf} />
                     </div>
                   </td>
                 ))}
