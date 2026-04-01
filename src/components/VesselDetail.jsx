@@ -105,16 +105,19 @@ export default function VesselDetail({ vessel, onClose, isAdmin }) {
   const alarms = r?.error_alarms || [];
   const ops = r?.operations || [];
 
-  const chartData = ops.slice(-10).map((op) => ({
-    date: op.date?.slice(5) || "-",
-    주입: op.ballast_volume || 0,
-    배출: op.deballast_volume || 0,
+  // 같은 날짜 운전량 합산
+  const dateMap = new Map();
+  for (const op of ops) {
+    const key = op.date?.slice(5) || "-";
+    if (!dateMap.has(key)) dateMap.set(key, { date: key, 주입: 0, 배출: 0 });
+    const d = dateMap.get(key);
+    d.주입 += (op.ballast_volume || 0);
+    d.배출 += (op.deballast_volume || 0);
+  }
+  const chartData = [...dateMap.values()].slice(-10).map(d => ({
+    ...d, 주입: +d.주입.toFixed(1), 배출: +d.배출.toFixed(1),
   }));
   const hasVolumeData = chartData.some(d => d.주입 > 0 || d.배출 > 0);
-  if (ops.length > 0) {
-    console.log('[VesselDetail] ops 첫 3건:', ops.slice(0, 3).map(o => ({ mode: o.operation_mode, date: o.date, bVol: o.ballast_volume, dVol: o.deballast_volume })));
-    console.log('[VesselDetail] chartData 첫 3건:', chartData.slice(0, 3));
-  }
 
   return (
     <div className="mt-4 bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
