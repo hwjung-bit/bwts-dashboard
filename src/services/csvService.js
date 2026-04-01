@@ -5,29 +5,46 @@
 // ============================================================
 
 /**
- * CSV 텍스트를 2D 배열로 파싱 (기본 따옴표 처리 포함)
+ * CSV 텍스트를 2D 배열로 파싱
+ * 멀티라인 따옴표 처리 지원 (예: "RUNNING TIME\n(HH:MM)")
  */
 function parseCsvRows(csvText) {
   if (!csvText || !csvText.trim()) return [];
-  return csvText.split(/\r?\n/).map(line => {
-    const cells = [];
-    let cur = '';
-    let inQuote = false;
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
-      if (ch === '"') {
-        if (inQuote && line[i + 1] === '"') { cur += '"'; i++; }
-        else inQuote = !inQuote;
-      } else if (ch === ',' && !inQuote) {
-        cells.push(cur.trim());
-        cur = '';
-      } else {
-        cur += ch;
-      }
+
+  const rows = [];
+  let cur = '';
+  let inQuote = false;
+  const cells = [];
+
+  for (let i = 0; i < csvText.length; i++) {
+    const ch = csvText[i];
+
+    if (ch === '"') {
+      if (inQuote && csvText[i + 1] === '"') { cur += '"'; i++; }
+      else inQuote = !inQuote;
+    } else if (ch === ',' && !inQuote) {
+      cells.push(cur.trim());
+      cur = '';
+    } else if ((ch === '\n' || ch === '\r') && !inQuote) {
+      // 줄바꿈 (따옴표 밖) → 행 완료
+      if (ch === '\r' && csvText[i + 1] === '\n') i++; // \r\n
+      cells.push(cur.trim());
+      cur = '';
+      if (cells.some(c => c !== '')) rows.push([...cells]);
+      cells.length = 0;
+    } else if ((ch === '\n' || ch === '\r') && inQuote) {
+      // 따옴표 안의 줄바꿈 → 공백으로 치환 (헤더 정규화)
+      cur += ' ';
+      if (ch === '\r' && csvText[i + 1] === '\n') i++;
+    } else {
+      cur += ch;
     }
-    cells.push(cur.trim());
-    return cells;
-  }).filter(row => row.some(c => c !== ''));
+  }
+  // 마지막 행
+  cells.push(cur.trim());
+  if (cells.some(c => c !== '')) rows.push([...cells]);
+
+  return rows;
 }
 
 /**
