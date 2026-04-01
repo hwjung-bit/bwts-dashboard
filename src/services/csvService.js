@@ -370,15 +370,20 @@ export function parseOpTimeCsv(csvText) {
   if (rows.length < 2) return [];
 
   const headerRow = rows[0];
+  console.log('[CSV/OpTime] 헤더:', JSON.stringify(headerRow));
+  console.log('[CSV/OpTime] 행 수:', rows.length);
+  if (rows.length > 1) console.log('[CSV/OpTime] 첫 데이터행:', JSON.stringify(rows[1]));
+
   const cols = detectColumns(headerRow, {
     mode:     ['OPERATION', 'OP MODE', 'OP_MODE', 'MODE', '운전모드'],
     date:     ['DATE', '날짜', 'DAY'],
-    start:    ['START', '시작'],
-    end:      ['END', '종료'],
+    start:    ['START TIME', '시작시간'],
+    end:      ['END TIME', '종료시간'],
     runtime:  ['RUNNING', 'RUNTIME', 'RUN_TIME', 'RUN TIME', '운전시간', 'DURATION'],
     position: ['POSITION', 'GPS', 'LOC', '위치'],
     volume:   ['VOLUME', 'VOL', 'TON', '처리량'],
   });
+  console.log('[CSV/OpTime] 컬럼 매핑:', JSON.stringify(cols));
 
   const operations = [];
   for (let i = 1; i < rows.length; i++) {
