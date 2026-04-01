@@ -227,11 +227,25 @@ function validateOperationDates(data) {
   for (const op of ops) {
     if (!op.date) continue;
     const d = new Date(op.date);
-    // Invalid Date 또는 날짜가 다르면(예: 2026-02-29 → 3월 1일로 밀림) 오류
-    if (isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== op.date) {
+    if (isNaN(d.getTime())) {
       invalid.push(op.date);
-      op.date = null; // null 처리
+      op.date = null;
+      continue;
     }
+    // 날짜 정규화 (zero-padding): "2026-2-2" → "2026-02-02"
+    const normalized = d.toISOString().slice(0, 10);
+    // 날짜가 밀렸는지 확인 (예: 2026-02-29 → 3월 1일로 밀림)
+    const parts = op.date.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (parts) {
+      const [, y, m, day] = parts;
+      if (d.getFullYear() !== +y || d.getMonth() + 1 !== +m || d.getDate() !== +day) {
+        invalid.push(op.date);
+        op.date = null;
+        continue;
+      }
+    }
+    // 정규화된 날짜로 교체 (차트 등에서 일관된 형식 사용)
+    op.date = normalized;
   }
   if (invalid.length > 0) {
     console.warn("[validateOperationDates] 유효하지 않은 날짜 감지:", invalid.join(", "));
