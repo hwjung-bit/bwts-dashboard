@@ -307,7 +307,7 @@ export default function App() {
             </div>
           ) : accessToken ? (
             activeView === "shiplogs" ? (
-              <ShipLogs vessels={vessels} />
+              <ShipLogs vessels={vessels} accessToken={accessToken} />
             ) : activeView === "calibration" ? (
               <CalibrationView accessToken={accessToken} />
             ) : (
