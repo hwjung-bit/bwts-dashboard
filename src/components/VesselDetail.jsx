@@ -111,6 +111,10 @@ export default function VesselDetail({ vessel, onClose, isAdmin }) {
     배출: op.deballast_volume || 0,
   }));
   const hasVolumeData = chartData.some(d => d.주입 > 0 || d.배출 > 0);
+  if (ops.length > 0) {
+    console.log('[VesselDetail] ops 첫 3건:', ops.slice(0, 3).map(o => ({ mode: o.operation_mode, date: o.date, bVol: o.ballast_volume, dVol: o.deballast_volume })));
+    console.log('[VesselDetail] chartData 첫 3건:', chartData.slice(0, 3));
+  }
 
   return (
     <div className="mt-4 bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">

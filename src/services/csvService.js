@@ -399,10 +399,14 @@ export function parseOpTimeCsv(csvText) {
 
     // DATE 컬럼 없으면 START TIME에서 날짜 추출
     let dateVal = get('date') || null;
-    if (!dateVal && get('start')) {
-      const m = get('start').match(/^(\d{4}-\d{1,2}-\d{1,2})/);
-      if (m) dateVal = m[1];
+    if (!dateVal) {
+      const startRaw = get('start');
+      if (startRaw) {
+        const m = startRaw.match(/(\d{4}-\d{1,2}-\d{1,2})/);
+        if (m) dateVal = m[1];
+      }
     }
+    if (i <= 3) console.log(`[CSV/OpTime] row${i}: mode=${mode}, date=${dateVal}, vol=${vol}, start=${get('start')}, ballast=${mode === 'BALLAST' ? vol : null}, deballast=${mode === 'DEBALLAST' ? vol : null}`);
 
     const gpsRaw = get('position') || null;
     const op = {
