@@ -289,39 +289,72 @@ function checkZeroOperations(data) {
   }
 }
 
-// ── 알람 코드별 권고 조치 룩업 ────────────────────────────────
+// ── 알람 코드별 권고 조치 룩업 (상세 원인 + 조치) ───────────────
 const ALARM_ACTION_KO = {
-  CODE200:      "CLX 시약 상태 점검 및 샘플링 라인 확인",
-  CODE201:      "중화제(STS) 주입 펌프 및 탱크 레벨 확인",
-  CODE301:      "중화제 탱크 레벨 센서 및 밸브 점검",
-  CODE302:      "중화제 탱크 레벨 센서 및 밸브 점검",
-  CODE303:      "중화제 탱크 레벨 센서 및 밸브 점검",
-  CODE605:      "단속 운전 발생 — ECS 재기동 원인 확인 권장",
-  CODE701:      "PLC 및 모듈 간 통신 케이블 연결 상태 확인",
-  CODE721:      "해당 밸브 공압 상태 및 리미트 스위치 점검",
-  VRCS_ERR:     "[긴급] 밸브 채터링 감지 — 공압 라인·리미트 스위치 즉각 점검",
-  LOG_OVERFLOW: "Event Log 100건 초과 — 전체 로그 상세 검토 권고",
+  CODE100:      "ECU 비상정지(EMCY) — 전극 과열/과압/전류 이상 가능성. ECU 내부 점검 및 PRU(정류기) 상태 확인. 반복 시 제조사 정밀 진단 필요",
+  CODE200:      "TRO 저농도(Low) — CLX 시약 유효기간 만료 또는 TSU Bypass Line 막힘 가능성. CLX 시약 교체 여부 및 샘플링 라인 소통 상태 점검",
+  CODE201:      "TRO 고농도(High) — 중화제(STS) 주입량 부족 가능성. STS 주입 펌프 작동 상태 및 탱크 잔량 확인. ANU 밸브 개폐 점검",
+  CODE301:      "중화제 탱크 초기 레벨 이상 — 레벨 센서 영점 교정 필요. 센서 배선 및 탱크 내부 플로트 상태 확인",
+  CODE302:      "중화제 탱크 저수위 — 중화제 보충 필요. 레벨 센서 정상 작동 여부 및 공급 라인 밸브 개폐 확인",
+  CODE303:      "중화제 탱크 고수위 — 오버플로우 방지 밸브 작동 확인. 레벨 센서 고착 여부 및 배출 라인 점검",
+  CODE402:      "440V MC(전자접촉기) 투입 실패 — 전원 공급 상태 및 MC 코일/접점 점검. 전원 차단기(MCCB) 트립 여부 확인",
+  CODE405:      "ECU 전류 과부하 — 전극 표면 스케일 부착 또는 해수 염분도 급변 가능성. 전극 세정(CIP) 실시 및 CSU 센서값 확인",
+  CODE406:      "ECU 입력 전압 저하 — 선내 배전반 전압 확인. 발전기 부하 상태 및 전압 조정기(AVR) 점검",
+  CODE407:      "ECU 입력 전압 과다 — 선내 배전반 전압 확인. 발전기 AVR 설정값 점검",
+  CODE600:      "해수 온도 저온 이상 — 저온 해역 운항 시 정상 발생 가능. 히터 작동 여부 확인. 지속 시 운전 모드 조정",
+  CODE603:      "냉각수 온도 과열 — 냉각수 펌프 작동 및 냉각수 라인 밸브 개폐 확인. 열교환기 오염 여부 점검",
+  CODE605:      "FMU 유량 과다(>110%) — 단속 운전 유발 가능. 유량 조절 밸브 개도 확인 및 FMU 센서 교정 점검",
+  CODE606:      "FMU 유량 부족(<15%) — 해수 공급 펌프 작동 확인. 스트레이너 막힘 및 흡입 밸브 개폐 점검",
+  CODE701:      "PLC 통신 장애 — RTU/AIM 모듈 간 통신 케이블 연결 상태 확인. 커넥터 접촉 불량 및 모듈 LED 상태 점검",
+  CODE703:      "센서 통신 에러 — 해당 센서 배선 및 커넥터 점검. 센서 모듈 교체 필요 여부 확인",
+  CODE704:      "Bypass 밸브 이상 — 밸브 리미트 스위치 위치 및 공압 라인 점검. 수동 개폐 테스트 실시",
+  CODE706:      "비상 운전(EM'CY Mode) 진입 — 자동 운전 불가 상태. 원인 알람 확인 후 리셋 및 정상 모드 복귀",
+  CODE721:      "밸브 작동 이상 — 해당 밸브 공압 실린더 및 리미트 스위치 점검. 솔레노이드 밸브 작동 확인",
+  CODE727:      "[긴급] 미처리수 배출 감지 — IMO 규정 위반 가능성. 즉시 운전 중지 후 밸브 라인업 및 TRO 센서 확인",
+  CODE731:      "밸브 비정상 종료 — 밸브 작동 중 ECS 비정상 종료 발생. 밸브 현재 위치 확인 후 수동 리셋",
+  CODE774:      "냉각수 밸브(F.W Inlet) 이상 — 냉각수 공급 밸브 리미트 스위치 및 공압 점검. 냉각수 라인 에어 벤트 확인",
+  VRCS_ERR:     "[긴급] 밸브 채터링(반복 개폐) 감지 — 공압 라인 누기, 리미트 스위치 고장, 솔레노이드 밸브 이상 가능성. 즉각 점검 필요",
+  LOG_OVERFLOW: "Event Log 100건 초과 — 반복 알람 원인 분석 및 전체 로그 상세 검토 필요",
 };
 const ALARM_ACTION_EN = {
-  CODE200:      "Check CLX reagent condition and sampling line",
-  CODE201:      "Check STS neutralizer injection pump and tank level",
-  CODE301:      "Inspect neutralizer tank level sensor and valves",
-  CODE302:      "Inspect neutralizer tank level sensor and valves",
-  CODE303:      "Inspect neutralizer tank level sensor and valves",
-  CODE605:      "Intermittent operation detected — check ECS restart cause",
-  CODE701:      "Check PLC and inter-module communication cables",
-  CODE721:      "Inspect valve pneumatic pressure and limit switches",
-  VRCS_ERR:     "[URGENT] Valve chattering detected — immediately inspect pneumatic line and limit switches",
-  LOG_OVERFLOW: "Event Log exceeded 100 entries — detailed log review recommended",
+  CODE100:      "ECU Emergency Stop — possible electrode overheating/overpressure. Inspect ECU internals and PRU(rectifier) status. Contact manufacturer if recurring",
+  CODE200:      "TRO Low — possible CLX reagent expiry or TSU bypass line blockage. Check CLX replacement date and sampling line flow",
+  CODE201:      "TRO High — possible insufficient STS neutralizer dosing. Check STS pump operation and tank level. Inspect ANU valve",
+  CODE301:      "Neutralizer tank initial level error — recalibrate level sensor zero point. Check sensor wiring and float condition",
+  CODE302:      "Neutralizer tank low level — replenish neutralizer. Check level sensor and supply line valves",
+  CODE303:      "Neutralizer tank high level — check overflow prevention valve. Inspect level sensor and drain line",
+  CODE402:      "440V MC engagement failure — check power supply and MC coil/contacts. Verify MCCB trip status",
+  CODE405:      "ECU overcurrent — possible electrode scaling or sudden salinity change. Perform CIP cleaning and check CSU sensor",
+  CODE406:      "ECU input voltage low — check switchboard voltage and generator AVR settings",
+  CODE407:      "ECU input voltage high — check switchboard voltage and generator AVR settings",
+  CODE600:      "Seawater temperature low — may be normal in cold water areas. Check heater operation",
+  CODE603:      "Cooling water temperature high — check cooling pump and heat exchanger fouling",
+  CODE605:      "FMU flow rate high (>110%) — may cause intermittent operation. Check flow control valve and FMU calibration",
+  CODE606:      "FMU flow rate low (<15%) — check seawater pump, strainer blockage, and suction valve",
+  CODE701:      "PLC communication failure — check RTU/AIM module cables and connectors. Inspect module LED status",
+  CODE703:      "Sensor communication error — check sensor wiring and connectors. Assess module replacement need",
+  CODE704:      "Bypass valve error — check valve limit switch and pneumatic line. Perform manual open/close test",
+  CODE706:      "Emergency mode entered — auto operation unavailable. Check root cause alarm, reset and return to normal mode",
+  CODE721:      "Valve operation error — check pneumatic cylinder and limit switch. Verify solenoid valve operation",
+  CODE727:      "[URGENT] Untreated water discharge detected — possible IMO violation. Stop operation immediately and check valve lineup and TRO sensor",
+  CODE731:      "Valve abnormal termination — ECS shut down during valve operation. Verify valve position and manual reset",
+  CODE774:      "Cooling water inlet valve error — check F.W valve limit switch and pneumatic line. Vent air from cooling line",
+  VRCS_ERR:     "[URGENT] Valve chattering detected — possible pneumatic leak, limit switch failure, or solenoid valve malfunction. Immediate inspection required",
+  LOG_OVERFLOW: "Event Log exceeded 100 entries — analyze repeated alarm root cause and perform detailed log review",
 };
 
-// ── ai_remarks 항상 전체 템플릿으로 생성 (Stage 2 AI 대체) ────
+// ── ai_remarks 종합 리포트 생성 (Stage 2 AI 대체) ────────────
 function autoFillRemarks(data) {
   const ops          = data.operations || [];
   const ballastCount = ops.filter(o => /^BALLAST$/i.test(o.operation_mode)).length;
   const deballastCount = ops.filter(o => /^DEBALLAST$/i.test(o.operation_mode)).length;
   const tro          = data.tro_data || {};
   const alarms       = data.error_alarms || [];
+  const efficiency   = data.data_log_efficiency || tro.efficiency || null;
+  const opStats      = data.op_time_stats || {};
+  const opAnomalies  = data.op_time_anomalies || [];
+  const gpsAreas     = data.gps_areas || [];
+  const evAnalysis   = data.event_log_analysis || {};
 
   const koLines = [];
   const enLines = [];
@@ -330,48 +363,82 @@ function autoFillRemarks(data) {
   const bMin = tro.ballasting_min;
   const bAvg = tro.ballasting_avg;
   const dMax = tro.deballasting_max;
-  // 판정 기준: 최솟값 우선 (없으면 평균으로 폴백)
   const bSafe = bMin ?? bAvg;
   const bOk   = bSafe != null && bSafe >= 5 && bSafe <= 10;
   const dOk   = dMax  != null && dMax < 0.1;
 
-  // 표시: "최솟값 X.XXppm / 평균 Y.YYppm" 형태
   const bTroDetail = bMin != null && bAvg != null
     ? `최솟값 ${bMin}ppm / 평균 ${bAvg}ppm`
-    : bMin != null ? `최솟값 ${bMin}ppm`
-    : bAvg != null ? `평균 ${bAvg}ppm`
-    : null;
+    : bMin != null ? `최솟값 ${bMin}ppm` : bAvg != null ? `평균 ${bAvg}ppm` : null;
   const bTroDetailEn = bMin != null && bAvg != null
     ? `min ${bMin}ppm / avg ${bAvg}ppm`
-    : bMin != null ? `min ${bMin}ppm`
-    : bAvg != null ? `avg ${bAvg}ppm`
-    : null;
+    : bMin != null ? `min ${bMin}ppm` : bAvg != null ? `avg ${bAvg}ppm` : null;
 
   const bTroKo = bTroDetail != null ? `${bTroDetail}(5~10ppm ${bOk ? "충족" : bSafe < 5 ? "미달" : "초과"})` : "미수신";
   const dTroKo = dMax != null ? `${dMax}ppm(IMO 기준 ${dOk ? "충족" : "초과"})` : "미수신";
   const bTroEn = bTroDetailEn != null ? `${bTroDetailEn}(5~10ppm: ${bOk ? "OK" : bSafe < 5 ? "low" : "high"})` : "N/A";
   const dTroEn = dMax != null ? `${dMax}ppm(IMO: ${dOk ? "compliant" : "exceeded"})` : "N/A";
 
-  koLines.push(`[운전 현황] 주입 ${ballastCount}회 / 배출 ${deballastCount}회. 주입 TRO ${bTroKo}. 배출 TRO 최댓값 ${dTroKo}.`);
-  enLines.push(`[Operations] ${ballastCount} ballasting / ${deballastCount} deballasting. Ballasting TRO ${bTroEn}. Deballasting TRO max ${dTroEn}.`);
+  // 처리량/운전시간 집계 포함
+  const bStats = opStats.BALLAST;
+  const dStats = opStats.DEBALLAST;
+  let volDetail = '';
+  let volDetailEn = '';
+  if (bStats || dStats) {
+    const parts = [];
+    const partsEn = [];
+    if (bStats) { parts.push(`주입 ${bStats.total_volume}m³/${bStats.total_runtime}h`); partsEn.push(`ballast ${bStats.total_volume}m³/${bStats.total_runtime}h`); }
+    if (dStats) { parts.push(`배출 ${dStats.total_volume}m³/${dStats.total_runtime}h`); partsEn.push(`deballast ${dStats.total_volume}m³/${dStats.total_runtime}h`); }
+    volDetail = ` 총 처리량: ${parts.join(', ')}.`;
+    volDetailEn = ` Total: ${partsEn.join(', ')}.`;
+  }
 
-  // ─ [ECU] ──────────────────────────────────────────────────
+  koLines.push(`[운전 현황] 주입 ${ballastCount}회 / 배출 ${deballastCount}회. 주입 TRO ${bTroKo}. 배출 TRO 최댓값 ${dTroKo}.${volDetail}`);
+  enLines.push(`[Operations] ${ballastCount} ballasting / ${deballastCount} deballasting. Ballasting TRO ${bTroEn}. Deballasting TRO max ${dTroEn}.${volDetailEn}`);
+
+  // ─ [ECU/FMU 분석] ──────────────────────────────────────────
   if (tro.ecu_current_avg != null || tro.fmu_flow_avg != null || tro.anu_status) {
     const parts = [
       tro.ecu_current_avg != null ? `전류 ${tro.ecu_current_avg}A` : null,
       tro.fmu_flow_avg    != null ? `유량 ${tro.fmu_flow_avg}m³/h` : null,
       tro.anu_status               ? `ANU ${tro.anu_status}`        : null,
     ].filter(Boolean).join(" / ");
-    koLines.push(`[ECU] ${parts}.`);
-    enLines.push(`[ECU] ${parts}.`);
+
+    // ECU-TRO 상관관계 분석
+    let correlation = '';
+    let correlationEn = '';
+    if (tro.ecu_current_avg != null && tro.fmu_flow_avg != null && bAvg != null) {
+      if (tro.ecu_current_avg > 500 && tro.fmu_flow_avg > 10 && (bAvg < 1 || bAvg === 0)) {
+        correlation = ' — ⚠️ 전류·유량 정상이나 TRO 미생성: 전극 열화 또는 TRO 센서 고장 의심';
+        correlationEn = ' — Warning: Current/flow normal but TRO not generated: possible electrode degradation or TRO sensor failure';
+      } else if (tro.ecu_current_avg > 500 && tro.fmu_flow_avg > 10 && bOk) {
+        correlation = ' — 전류·유량·TRO 정상 상관관계 확인';
+        correlationEn = ' — Current/flow/TRO correlation normal';
+      }
+    }
+    // 처리 효율 판정 포함
+    let effNote = '';
+    let effNoteEn = '';
+    if (efficiency) {
+      if (efficiency.current_level === 'LOW') { effNote += ` ⚠️ ${efficiency.current_detail}.`; effNoteEn += ` Warning: ${efficiency.current_detail}.`; }
+      if (efficiency.salinity_impact === 'LOW' || efficiency.salinity_impact === 'ULTRA_LOW') { effNote += ` ⚠️ ${efficiency.salinity_detail}.`; effNoteEn += ` Warning: ${efficiency.salinity_detail}.`; }
+    }
+
+    koLines.push(`[ECU] ${parts}${correlation}.${effNote}`);
+    enLines.push(`[ECU] ${parts}${correlationEn}.${effNoteEn}`);
   }
 
-  // ─ 알람 코드별 ────────────────────────────────────────────
+  // ─ [TRO 이상 경고] ─────────────────────────────────────────
+  if (tro._deballasting_warning) {
+    koLines.push(`[TRO 경고] ${tro._deballasting_warning}. Data Log 원본 확인 권장.`);
+    enLines.push(`[TRO Warning] Deballasting TRO ${dMax}ppm — significantly exceeds IMO limit (0.1ppm). Possible sensor cross-contamination or column mismatch. Verify raw Data Log.`);
+  }
+
+  // ─ 알람 코드별 (상세 원인/조치) ────────────────────────────
   if (alarms.length === 0) {
     koLines.push("[알람없음] 이상 알람 없음.");
     enLines.push("[No Alarms] No abnormal alarms detected.");
   } else {
-    // 코드별로 집계 (groupRepeatAlarms 처리 후라 count 필드 있음)
     const codeMap = new Map();
     for (const a of alarms) {
       const code = a.code || "(코드없음)";
@@ -385,23 +452,55 @@ function autoFillRemarks(data) {
       const nonTrips = g.total - g.trips;
       const parts = [g.trips && `Trip×${g.trips}`, nonTrips && `Alarm×${nonTrips}`].filter(Boolean).join("+");
       const countStr = parts ? `${parts} — ` : "";
-      koLines.push(`[${code}] ${countStr}${ALARM_ACTION_KO[code] || "점검 필요 — 제조사 문의"}.`);
-      enLines.push(`[${code}] ${countStr}${ALARM_ACTION_EN[code] || "Inspection required — contact manufacturer"}.`);
+      koLines.push(`[${code}] ${countStr}${ALARM_ACTION_KO[code] || "점검 필요 — 상세 원인 확인 후 제조사 기술지원 요청"}.`);
+      enLines.push(`[${code}] ${countStr}${ALARM_ACTION_EN[code] || "Inspection required — identify root cause and contact manufacturer for technical support"}.`);
     }
+
+    // 반복 알람 경고 (5회 이상)
+    const repeated = evAnalysis.repeated_alarms || [];
+    if (repeated.length > 0) {
+      const repCodes = repeated.map(r => `${r.code}(${r.total}회)`).join(', ');
+      koLines.push(`[반복 알람] ${repCodes} — 동일 알람 반복 발생. 근본 원인 분석(RCA) 필요.`);
+      enLines.push(`[Repeated Alarms] ${repeated.map(r => `${r.code}(${r.total}x)`).join(', ')} — Root cause analysis required.`);
+    }
+  }
+
+  // ─ [운전 이상] (OpTime 이상 탐지 결과) ─────────────────────
+  if (opAnomalies.length > 0) {
+    const flagCounts = {};
+    for (const a of opAnomalies) { flagCounts[a.flag] = (flagCounts[a.flag] || 0) + 1; }
+    const flagStr = Object.entries(flagCounts).map(([f, c]) => `${f} ${c}건`).join(', ');
+    koLines.push(`[운전 이상] ${flagStr}.`);
+    enLines.push(`[Operation Anomalies] ${Object.entries(flagCounts).map(([f, c]) => `${f} ${c} case(s)`).join(', ')}.`);
+  }
+
+  // ─ [운항 해역] ─────────────────────────────────────────────
+  if (gpsAreas.length > 0) {
+    koLines.push(`[운항 해역] ${gpsAreas.join(', ')}.`);
+    enLines.push(`[Operating Area] ${gpsAreas.join(', ')}.`);
   }
 
   // ─ [종합] ─────────────────────────────────────────────────
   const status = (data.overall_status || "NORMAL").toUpperCase();
-  const tripCount = alarms.filter(a => (a.level || "").toLowerCase() === "trip").length;
+  const tripCount = alarms.filter(a => (a.level || "").toLowerCase() === "trip").reduce((s, a) => s + (a.count || 1), 0);
+  const alarmCount = alarms.reduce((s, a) => s + (a.count || 1), 0) - tripCount;
+
+  const issues = [];
+  const issuesEn = [];
+  if (tripCount > 0) { issues.push(`Trip ${tripCount}건 발생`); issuesEn.push(`${tripCount} trip(s)`); }
+  if (!bOk && bSafe != null) { issues.push(`주입 TRO ${bSafe < 5 ? '미달' : '초과'}`); issuesEn.push(`ballasting TRO ${bSafe < 5 ? 'low' : 'high'}`); }
+  if (!dOk && dMax != null) { issues.push(`배출 TRO 기준 초과`); issuesEn.push(`deballasting TRO exceeded`); }
+  if (tro._deballasting_warning) { issues.push('배출 TRO 이상값 확인 필요'); issuesEn.push('deballasting TRO anomaly detected'); }
+
   if (status === "CRITICAL") {
-    koLines.push(`[종합] Trip ${tripCount}건 발생. 즉각적인 장비 점검이 필요합니다.`);
-    enLines.push(`[Summary] ${tripCount} trip event(s) detected. Immediate equipment inspection required.`);
+    koLines.push(`[종합] ${issues.join(', ')}. 즉각적인 장비 점검 및 원인 분석이 필요합니다. ${alarmCount > 5 ? '알람 다발 — 정비 이력 확인 권장.' : ''}`);
+    enLines.push(`[Summary] ${issuesEn.join(', ')}. Immediate equipment inspection and root cause analysis required. ${alarmCount > 5 ? 'Multiple alarms — review maintenance history.' : ''}`);
   } else if (status === "WARNING") {
-    koLines.push("[종합] 주의 필요 — 알람 내역 및 TRO 수치를 검토하시기 바랍니다.");
-    enLines.push("[Summary] Attention required — please review alarm records and TRO values.");
+    koLines.push(`[종합] ${issues.length > 0 ? issues.join(', ') + '. ' : ''}주의 필요 — 알람 내역 및 TRO 수치를 모니터링하시기 바랍니다.`);
+    enLines.push(`[Summary] ${issuesEn.length > 0 ? issuesEn.join(', ') + '. ' : ''}Attention required — monitor alarm records and TRO values.`);
   } else {
-    koLines.push("[종합] 이상 없음. 정상 운전 중입니다.");
-    enLines.push("[Summary] No issues detected. Normal operation.");
+    koLines.push("[종합] 전반적으로 정상 운전 중. 특이사항 없음.");
+    enLines.push("[Summary] Overall normal operation. No significant issues detected.");
   }
 
   data.ai_remarks    = koLines;
@@ -413,11 +512,11 @@ function autoFillRemarks(data) {
 function sanitizeTroValues(data) {
   const tro = data.tro_data;
   if (!tro) return;
-  // 100ppm 초과는 센서오류/단위오류로 간주 → null 처리 + ai_remarks 경고
+  // 100ppm 초과는 센서오류/단위오류로 간주 → null 처리
   if (tro.ballasting_avg != null && tro.ballasting_avg > 100) {
     const val = tro.ballasting_avg;
     tro.ballasting_avg = null;
-    const note = `주입 TRO ${val}ppm — 비정상 수치(센서 오류 또는 단위 오류 의심). 재확인 필요.`;
+    const note = `[TRO 이상] 주입 TRO ${val}ppm — 비정상 수치(센서 오류 또는 단위 오류 의심). Data Log 원본 재확인 필요.`;
     const arr = Array.isArray(data.ai_remarks) ? data.ai_remarks : [];
     if (!arr.some((l) => l.includes("비정상 수치"))) arr.push(note);
     data.ai_remarks = arr;
@@ -425,10 +524,14 @@ function sanitizeTroValues(data) {
   if (tro.deballasting_max != null && tro.deballasting_max > 100) {
     const val = tro.deballasting_max;
     tro.deballasting_max = null;
-    const note = `배출 TRO 최댓값 ${val}ppm — 비정상 수치(센서 오류 또는 단위 오류 의심). 재확인 필요.`;
+    const note = `[TRO 이상] 배출 TRO 최댓값 ${val}ppm — 비정상 수치(센서 오류 또는 단위 오류 의심). Data Log 원본 재확인 필요.`;
     const arr = Array.isArray(data.ai_remarks) ? data.ai_remarks : [];
     if (!arr.some((l) => l.includes("비정상 수치"))) arr.push(note);
     data.ai_remarks = arr;
+  }
+  // 배출 TRO > 1.0ppm — 비정상적 높음 (정상 <0.1ppm). 센서 교차오염 또는 파싱 오류 가능성 경고
+  if (tro.deballasting_max != null && tro.deballasting_max > 1.0) {
+    tro._deballasting_warning = `배출 TRO ${tro.deballasting_max}ppm — IMO 기준(0.1ppm) 대폭 초과. TRO 센서 교차오염, Ballast/Deballast 컬럼 혼동, 또는 중화 불량 가능성`;
   }
 }
 
