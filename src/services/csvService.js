@@ -392,20 +392,25 @@ export function parseOpTimeCsv(csvText) {
     const volNum = parseFloat(get('volume') || '');
     const vol    = isNaN(volNum) ? null : volNum;
 
+    // DATE 컬럼 없으면 START TIME에서 날짜 추출
+    let dateVal = get('date') || null;
+    if (!dateVal && get('start')) {
+      const m = get('start').match(/^(\d{4}-\d{1,2}-\d{1,2})/);
+      if (m) dateVal = m[1];
+    }
+
     const gpsRaw = get('position') || null;
     const op = {
       operation_mode:   mode,
-      date:             get('date') || null,
+      date:             dateVal,
       start_time:       get('start') || null,
       end_time:         get('end') || null,
       run_time:         parseRunTime(get('runtime')),   // 시간(소수)
       location_gps:     gpsRaw,
       parsed_gps:       parseGpsFromRow(gpsRaw),        // { lat, lon, area } 또는 null
+      ballast_volume:   mode === 'BALLAST' ? vol : null,
+      deballast_volume: mode === 'DEBALLAST' ? vol : null,
     };
-    // 모드에 따라 볼륨 필드 구분 (STAGE1_TEXT_SCHEMA 일치)
-    if (mode === 'BALLAST')   op.ballast_volume   = vol;
-    else if (mode === 'DEBALLAST') op.deballast_volume = vol;
-    else                      op.ballast_volume   = vol; // STRIPPING 등 fallback
 
     operations.push(op);
   }
