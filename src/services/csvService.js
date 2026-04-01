@@ -369,10 +369,20 @@ export function parseOpTimeCsv(csvText) {
   const rows = parseCsvRows(csvText);
   if (rows.length < 2) return [];
 
-  const headerRow = rows[0];
-  console.log('[CSV/OpTime] 헤더:', JSON.stringify(headerRow));
-  console.log('[CSV/OpTime] 행 수:', rows.length);
-  if (rows.length > 1) console.log('[CSV/OpTime] 첫 데이터행:', JSON.stringify(rows[1]));
+  // 헤더 자동 탐지: OPERATION 키워드가 포함된 행을 헤더로 사용
+  // (pdfplumber 변환 시 앞에 메타데이터 행이 붙을 수 있음)
+  let headerIdx = 0;
+  for (let i = 0; i < Math.min(rows.length, 20); i++) {
+    const upper = rows[i].map(c => (c || '').toUpperCase());
+    if (upper.some(c => c === 'OPERATION') && upper.some(c => c.includes('TIME'))) {
+      headerIdx = i;
+      break;
+    }
+  }
+
+  const headerRow = rows[headerIdx];
+  console.log('[CSV/OpTime] 헤더(행 ' + headerIdx + '):', JSON.stringify(headerRow));
+  console.log('[CSV/OpTime] 총 행 수:', rows.length);
 
   const cols = detectColumns(headerRow, {
     mode:     ['OPERATION', 'OP MODE', 'OP_MODE', 'MODE', '운전모드'],
@@ -386,7 +396,7 @@ export function parseOpTimeCsv(csvText) {
   console.log('[CSV/OpTime] 컬럼 매핑:', JSON.stringify(cols));
 
   const operations = [];
-  for (let i = 1; i < rows.length; i++) {
+  for (let i = headerIdx + 1; i < rows.length; i++) {
     const row = rows[i];
     if (row.length < 2) continue;
     const get = (f) => (cols[f] != null ? (row[cols[f]] || '').trim() : null);
@@ -447,7 +457,21 @@ export function parseDataLogCsv(csvText) {
   const rows = parseCsvRows(csvText);
   if (rows.length < 2) return null;
 
-  const headerRow = rows[0];
+  // 헤더 자동 탐지: INDEX+TIME 또는 OPERATION 키워드가 있는 행
+  let headerIdx = 0;
+  for (let i = 0; i < Math.min(rows.length, 20); i++) {
+    const upper = rows[i].map(c => (c || '').toUpperCase());
+    if ((upper.includes('INDEX') && upper.some(c => c.includes('TIME'))) ||
+        (upper.includes('OPERATION') && upper.some(c => c.includes('TRO') || c.includes('REC') || c.includes('FMU')))) {
+      headerIdx = i;
+      break;
+    }
+  }
+  // 헤더 이후 행만 사용
+  const actualRows = rows.slice(headerIdx);
+  if (actualRows.length < 2) return null;
+
+  const headerRow = actualRows[0];
   const upper     = headerRow.map(h => (h || '').toUpperCase().trim());
 
   // ── Format B (TECHCROSS/KHM) 감지 ─────────────────────────────
@@ -462,13 +486,13 @@ export function parseDataLogCsv(csvText) {
   if (opColIdx >= 0) {
     if (isFormatB) {
       console.log('[CSV/DataLog] Format B (TECHCROSS) 감지');
-      return _parseDataLogFormatB(rows, upper, opColIdx);
+      return _parseDataLogFormatB(actualRows, upper, opColIdx);
     }
-    return _parseDataLogTimeSeries(rows, upper, opColIdx);
+    return _parseDataLogTimeSeries(actualRows, upper, opColIdx);
   }
 
   // ── 요약 1행 모드 ─────────────────────────────────────────────
-  return _parseDataLogSummary(rows, upper);
+  return _parseDataLogSummary(actualRows, upper);
 }
 
 /** 셀 값이 '-' 또는 빈문자열이면 NaN 반환 (센서 미장착) */
@@ -855,7 +879,17 @@ export function parseEventLogCsv(csvText) {
   }
   if (rows.length < 2) return { alarms: [], wrongTerminationCount: 0, gpsTimeSetCount: 0 };
 
-  const headerRow = rows[0];
+  // 헤더 자동 탐지: DATE+LEVEL 또는 DATE+DESCRIPTION이 있는 행
+  let headerIdx = 0;
+  for (let i = 0; i < Math.min(rows.length, 20); i++) {
+    const upper = rows[i].map(c => (c || '').toUpperCase());
+    if (upper.some(c => c.includes('DATE')) && (upper.some(c => c.includes('LEVEL')) || upper.some(c => c.includes('DESCRIPTION')))) {
+      headerIdx = i;
+      break;
+    }
+  }
+
+  const headerRow = rows[headerIdx];
   const cols = detectColumns(headerRow, {
     date:        ['DATE', '날짜'],
     level:       ['LEVEL', 'TYPE', '종류'],
@@ -876,7 +910,7 @@ export function parseEventLogCsv(csvText) {
   let powerOnCount = 0;
   let properTerminationCount = 0;
 
-  for (let i = 1; i < rows.length; i++) {
+  for (let i = headerIdx + 1; i < rows.length; i++) {
     const row = rows[i];
     if (row.length < 2) continue;
     const get = (f) => (cols[f] != null ? (row[cols[f]] || '').trim() : null);
