@@ -17,7 +17,8 @@
       "Bash(pip install:*)",
       "Bash(where npm:*)",
       "mcp__Claude_Preview__preview_start",
-      "Read(//c/Users/user/AppData/Roaming/Claude/**)"
+      "Read(//c/Users/user/AppData/Roaming/Claude/**)",
+      "Bash(find '/d/CLAUDE CODE/bwts-dashboard/.claude/worktrees/zen-chatelet' -name *.md)"
     ]
   }
 }
