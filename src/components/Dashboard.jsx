@@ -76,6 +76,8 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
   const [scanInfo, setScanInfo]        = useState(null);
   const [scanExpanded, setScanExpanded] = useState(true);
   const [selectedId, setSelectedId]   = useState(null);
+  const [eventLogInputs, setEventLogInputs]   = useState({});  // { [vesselId]: string }
+  const [eventLogParsing, setEventLogParsing] = useState({});
 
   // 월/연도 변경 시 해당 월 데이터 로드 (Sheets 우선, fallback localStorage)
   useEffect(() => {
@@ -146,17 +148,19 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
       const monthData = await collectMonthData(CONFIG.DRIVE_ROOT_FOLDER_ID, year, month, accessToken);
       const mk = (vessel.vesselCode || vessel.name).toLowerCase();
       const entry = monthData.find((d) => d.vesselFolderName.toLowerCase().includes(mk));
-      if (!entry || entry.pdfs.length === 0) {
-        // Drive 폴더/PDF 없음 → 기존 상태 유지 + 에러 표시
+      const csvFiles = entry?.csvFiles ?? [];
+      if (!entry || (entry.pdfs.length === 0 && csvFiles.length === 0)) {
+        // Drive 폴더/PDF/CSV 없음 → 기존 상태 유지 + 에러 표시
         updateMonthlyVessel(vesselId, {
           analysisStatus: prevStatus,
-          analysisError: `[${year}년 ${month}월] Drive에서 PDF를 찾을 수 없습니다.`,
+          analysisError: `[${year}년 ${month}월] Drive에서 분석 파일을 찾을 수 없습니다.`,
         });
         setAnalyzeError(`${vessel.vesselCode || vessel.name}: Drive 폴더를 찾을 수 없습니다.`);
         return;
       }
-      const logPdfs = filterLogPdfs(entry.pdfs);
-      const result = await analyzePdfFromDrive(logPdfs, accessToken, vessel);
+      const vesselWithPeriod = { ...vessel, year, month };
+      const logPdfs = csvFiles.length > 0 ? [] : filterLogPdfs(entry.pdfs);
+      const result = await analyzePdfFromDrive([...csvFiles, ...logPdfs], accessToken, vesselWithPeriod);
       const mapped = mapOverallStatus(result?.overall_status, result?.error_alarms);
       const finalStatus = mapped === "NO_DATA" ? "RECEIVED" : mapped;
       updateMonthlyVessel(vesselId, {
@@ -189,16 +193,16 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
       vessels.forEach((vessel) => {
         const mk = (vessel.vesselCode || vessel.name).toLowerCase();
         const entry = monthData.find((d) => d.vesselFolderName.toLowerCase().includes(mk));
-        const hasPdfs = entry && entry.pdfs.length > 0;
+        const hasPdfs = entry && (entry.pdfs.length > 0 || (entry.csvFiles?.length ?? 0) > 0);
         const current = monthlyData[vessel.id]?.analysisStatus;
         const analyzed = ["NORMAL", "WARNING", "CRITICAL", "REVIEWED"].includes(current);
         if (!analyzed) {
           updateMonthlyVessel(vessel.id, {
             analysisStatus: hasPdfs ? "RECEIVED" : "NO_DATA",
-            pdfCount: hasPdfs ? entry.pdfs.length : 0,
+            pdfCount: hasPdfs ? (entry.csvFiles?.length || entry.pdfs.length) : 0,
           });
         }
-        if (entry) matchedFolders.push({ vesselName: vessel.name, folderName: entry.vesselFolderName, pdfs: entry.pdfs.length });
+        if (entry) matchedFolders.push({ vesselName: vessel.name, folderName: entry.vesselFolderName, pdfs: entry.pdfs.length, csvs: entry.csvFiles?.length ?? 0 });
       });
 
       // 미매핑 Drive 폴더 (등록 안된 선박)
@@ -257,7 +261,7 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
       const targets = vessels.filter((vessel) => {
         const mk = (vessel.vesselCode || vessel.name).toLowerCase();
         const entry = monthData.find((d) => d.vesselFolderName.toLowerCase().includes(mk));
-        return entry && entry.pdfs.length > 0;
+        return entry && (entry.pdfs.length > 0 || (entry.csvFiles?.length ?? 0) > 0);
       });
 
       for (const vessel of targets) {
@@ -267,8 +271,10 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
         setAnalyzingNames([displayName]);
         updateMonthlyVessel(vessel.id, { analysisStatus: "LOADING", analysisResult: null, analysisError: null });
         try {
-          const logPdfs = filterLogPdfs(entry.pdfs);
-          const result = await analyzePdfFromDrive(logPdfs, accessToken, vessel);
+          const csvFiles = entry?.csvFiles ?? [];
+          const vesselWithPeriod = { ...vessel, year, month };
+          const logPdfs = csvFiles.length > 0 ? [] : filterLogPdfs(entry.pdfs);
+          const result = await analyzePdfFromDrive([...csvFiles, ...logPdfs], accessToken, vesselWithPeriod);
           const mapped = mapOverallStatus(result?.overall_status, result?.error_alarms);
           const finalStatus = mapped === "NO_DATA" ? "RECEIVED" : mapped;
           updateMonthlyVessel(vessel.id, {
@@ -300,6 +306,27 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
         if (changed) saveMonthlyData(year, month, next);
         return changed ? next : prev;
       });
+    }
+  }
+
+  // EVENTLOG 수동 입력 → 기존 결과에 알람 병합 후 재정규화
+  async function handleSubmitEventLog(vesselId) {
+    setEventLogParsing(p => ({ ...p, [vesselId]: true }));
+    try {
+      const text = eventLogInputs[vesselId] ?? '';
+      const { parseEventLogCsv } = await import('../services/csvService.js');
+      const { validateAndNormalizeResult } = await import('../services/geminiService.js');
+      const newAlarms = parseEventLogCsv(text);
+      const existing  = monthlyData[vesselId]?.analysisResult ?? {};
+      const merged = {
+        ...existing,
+        error_alarms:       [...(existing.error_alarms ?? []), ...newAlarms],
+        _event_log_missing: false,
+      };
+      const final = validateAndNormalizeResult(merged, null);
+      updateMonthlyVessel(vesselId, { analysisResult: final });
+    } finally {
+      setEventLogParsing(p => ({ ...p, [vesselId]: false }));
     }
   }
 
@@ -534,6 +561,29 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
                 onUpdate={(updates) => updateMonthlyVessel(selectedId, updates)}
                 period={`${year}년 ${month}월`}
               />
+              {/* ── EVENTLOG 누락 시 수동 입력 패널 ── */}
+              {selectedVessel.analysisResult?._event_log_missing && (
+                <div className="mt-4 bg-amber-50 border border-amber-200 rounded-xl p-5">
+                  <h3 className="font-semibold text-amber-800 mb-1">⚠ Event Log 수동 입력</h3>
+                  <p className="text-sm text-amber-700 mb-3">
+                    EVENTLOG.CSV가 없습니다. 원본 PDF에서 알람/이벤트 내용을 CSV 형식으로 복사하여 붙여넣으세요.
+                  </p>
+                  <textarea
+                    className="w-full border border-amber-300 rounded-lg p-2 text-xs font-mono resize-y bg-white"
+                    value={eventLogInputs[selectedId] ?? ''}
+                    onChange={e => setEventLogInputs(p => ({ ...p, [selectedId]: e.target.value }))}
+                    placeholder={"DATE,TIME,LEVEL,CODE,DESCRIPTION,DEVICE\n2026-01-01,05:30,Alarm,CODE200,TRO Concentration Low,PUMP1"}
+                    rows={8}
+                  />
+                  <button
+                    className="mt-2 px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700 disabled:opacity-50"
+                    onClick={() => handleSubmitEventLog(selectedId)}
+                    disabled={eventLogParsing[selectedId] || !eventLogInputs[selectedId]?.trim()}
+                  >
+                    {eventLogParsing[selectedId] ? '처리 중...' : '알람 분析 적용'}
+                  </button>
+                </div>
+              )}
             </>
           )}
         </>

@@ -125,11 +125,15 @@ export async function collectMonthData(
   // 3. 선박(수신) 폴더 탐색
   const vesselFolders = await listVesselFolders(monthFolder.id, accessToken);
 
-  // 4. 각 선박 폴더의 PDF 수집
+  // 4. 각 선박 폴더의 PDF + CSV 수집
   const results = await Promise.all(
     vesselFolders.map(async (vf) => {
-      const pdfs = await listPdfFiles(vf.id, accessToken);
-      return { vesselFolderName: vf.name, folderId: vf.id, pdfs };
+      const [pdfs, allFiles] = await Promise.all([
+        listPdfFiles(vf.id, accessToken),
+        listFolderContents(vf.id, accessToken),
+      ]);
+      const csvFiles = allFiles.filter(f => f.name.toUpperCase().endsWith('.CSV'));
+      return { vesselFolderName: vf.name, folderId: vf.id, pdfs, csvFiles };
     })
   );
 
@@ -158,8 +162,12 @@ export async function collectYearData(rootFolderId, year, accessToken) {
       const vesselFolders = await listVesselFolders(mf.id, accessToken);
       const pdfs = await Promise.all(
         vesselFolders.map(async (vf) => {
-          const files = await listPdfFiles(vf.id, accessToken);
-          return { vesselFolderName: vf.name, folderId: vf.id, pdfs: files };
+          const [files, allFiles] = await Promise.all([
+            listPdfFiles(vf.id, accessToken),
+            listFolderContents(vf.id, accessToken),
+          ]);
+          const csvFiles = allFiles.filter(f => f.name.toUpperCase().endsWith('.CSV'));
+          return { vesselFolderName: vf.name, folderId: vf.id, pdfs: files, csvFiles };
         })
       );
       result[normalizeMonth(mf.name)] = pdfs;

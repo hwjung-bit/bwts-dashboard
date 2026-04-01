@@ -24,6 +24,7 @@ export const STAGE1_TEXT_SCHEMA = `{
   ],
   "tro_data": {
     "ballasting_avg": "주입(Ballasting) 안정 구간 평균 TRO (ppm). (동적으로 식별된 T1, T2, TRO_B1 등 모든 TRO 센서들의 0~15 사이 값들의 평균). 없으면 null",
+    "ballasting_min": "주입(Ballasting) 안정 구간 최솟값 TRO (ppm). Warm-up 첫 5행(≈10분) 제외 후 최솟값. 단 한 번이라도 5ppm 미만이면 기준 미달. 없으면 null",
     "deballasting_max": "배출(De-ballasting) TRO 최댓값 (ppm). (DEBALLAST/N-D 행의 TRO_D*, TRO_S* 컬럼 값 중 0~15 사이 최댓값). 없으면 null",
     "ecu_current_avg": "ECU 정류기 전류 평균 (A, Data Log 운전 구간 기준, 수백~수천 단위). 없으면 null",
     "fmu_flow_avg": "유량계(FMU) 평균 유량 (m³/h 또는 T/h). 없으면 null",
@@ -80,6 +81,7 @@ export const STAGE1_RESPONSE_SCHEMA = {
       type: "object",
       properties: {
         ballasting_avg:   { type: "number", nullable: true },
+        ballasting_min:   { type: "number", nullable: true },
         deballasting_max: { type: "number", nullable: true },
         ecu_current_avg:  { type: "number", nullable: true },
         fmu_flow_avg:     { type: "number", nullable: true },

@@ -209,9 +209,15 @@ export function parseDataLog(rows, debug = null) {
 
   const avg = arr => arr.length ? +(arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(2) : null;
   const max = arr => arr.length ? +(Math.max(...arr)).toFixed(2) : null;
+  const min = arr => arr.length ? +(Math.min(...arr)).toFixed(2) : null;
+
+  // 안정구간 최솟값: warm-up 첫 5행 제외 (≈첫 10분)
+  const ballastTROsStable = ballastTROs.slice(5);
+  const ballastMinArr = ballastTROsStable.length > 0 ? ballastTROsStable : ballastTROs;
 
   return {
     ballasting_avg:   avg(ballastTROs),
+    ballasting_min:   min(ballastMinArr),
     deballasting_max: max(deballastTROs),
     ecu_current_avg:  avg(ecuValues),
     fmu_flow_avg:     avg(fmuValues),

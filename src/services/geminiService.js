@@ -157,7 +157,10 @@ function recalcOverallStatus(data) {
   }, 0);
 
   // TRO 기준 위반 여부
-  const troBallastBad   = tro.ballasting_avg   != null && (tro.ballasting_avg < 5 || tro.ballasting_avg > 10);
+  // 주입: ballasting_min(안정구간 최솟값)이 판정 기준 — 단 한 번이라도 5ppm 미만이면 문제
+  //       ballasting_min 없으면 ballasting_avg로 폴백
+  const troSafetyVal    = tro.ballasting_min ?? tro.ballasting_avg;
+  const troBallastBad   = troSafetyVal != null && (troSafetyVal < 5 || troSafetyVal > 10);
   const troDeballastBad = tro.deballasting_max  != null && tro.deballasting_max > 0.1;
 
   // LOG_OVERFLOW 감지
@@ -167,7 +170,7 @@ function recalcOverallStatus(data) {
   const ops          = data.operations || [];
   const hadBallast   = ops.some((o) => /BALLAST/i.test(o.operation_mode || "") && !/DE/i.test(o.operation_mode || ""));
   const hadDeballast = ops.some((o) => /DEBALLAST/i.test(o.operation_mode || ""));
-  const troAllNull   = (hadBallast   && tro.ballasting_avg   == null)
+  const troAllNull   = (hadBallast   && tro.ballasting_avg == null && tro.ballasting_min == null)
                     || (hadDeballast && tro.deballasting_max == null);
 
   let jsStatus;
@@ -310,14 +313,29 @@ function autoFillRemarks(data) {
   const enLines = [];
 
   // ─ [운전 현황] ─────────────────────────────────────────────
+  const bMin = tro.ballasting_min;
   const bAvg = tro.ballasting_avg;
   const dMax = tro.deballasting_max;
-  const bOk  = bAvg != null && bAvg >= 5 && bAvg <= 10;
-  const dOk  = dMax != null && dMax < 0.1;
+  // 판정 기준: 최솟값 우선 (없으면 평균으로 폴백)
+  const bSafe = bMin ?? bAvg;
+  const bOk   = bSafe != null && bSafe >= 5 && bSafe <= 10;
+  const dOk   = dMax  != null && dMax < 0.1;
 
-  const bTroKo = bAvg != null ? `${bAvg}ppm(5~10ppm ${bOk ? "충족" : bAvg < 5 ? "미달" : "초과"})` : "미수신";
+  // 표시: "최솟값 X.XXppm / 평균 Y.YYppm" 형태
+  const bTroDetail = bMin != null && bAvg != null
+    ? `최솟값 ${bMin}ppm / 평균 ${bAvg}ppm`
+    : bMin != null ? `최솟값 ${bMin}ppm`
+    : bAvg != null ? `평균 ${bAvg}ppm`
+    : null;
+  const bTroDetailEn = bMin != null && bAvg != null
+    ? `min ${bMin}ppm / avg ${bAvg}ppm`
+    : bMin != null ? `min ${bMin}ppm`
+    : bAvg != null ? `avg ${bAvg}ppm`
+    : null;
+
+  const bTroKo = bTroDetail != null ? `${bTroDetail}(5~10ppm ${bOk ? "충족" : bSafe < 5 ? "미달" : "초과"})` : "미수신";
   const dTroKo = dMax != null ? `${dMax}ppm(IMO 기준 ${dOk ? "충족" : "초과"})` : "미수신";
-  const bTroEn = bAvg != null ? `${bAvg}ppm(5~10ppm: ${bOk ? "OK" : bAvg < 5 ? "low" : "high"})` : "N/A";
+  const bTroEn = bTroDetailEn != null ? `${bTroDetailEn}(5~10ppm: ${bOk ? "OK" : bSafe < 5 ? "low" : "high"})` : "N/A";
   const dTroEn = dMax != null ? `${dMax}ppm(IMO: ${dOk ? "compliant" : "exceeded"})` : "N/A";
 
   koLines.push(`[운전 현황] 주입 ${ballastCount}회 / 배출 ${deballastCount}회. 주입 TRO ${bTroKo}. 배출 TRO 최댓값 ${dTroKo}.`);
@@ -941,6 +959,38 @@ export async function analyzePdfFromDrive(files, accessToken, vessel = {}) {
   const normalizedFiles = Array.isArray(files)
     ? files.map(f => typeof f === "string" ? { id: f, name: "" } : f)
     : [typeof files === "string" ? { id: files, name: "" } : files];
+
+  // ★ CSV 파일 감지 → PDF 파이프라인 완전 건너뜀
+  const csvFiles = normalizedFiles.filter(f => (f.name || '').toUpperCase().endsWith('.CSV'));
+  if (csvFiles.length > 0) {
+    console.log('[CSV] CSV 파일 감지 — PDF 파이프라인 건너뜀:', csvFiles.map(f => f.name).join(', '));
+    const opFile   = csvFiles.find(f => detectEcsFileType(f.name) === 'optime');
+    const dataFile = csvFiles.find(f => detectEcsFileType(f.name) === 'data');
+    const evFile   = csvFiles.find(f => detectEcsFileType(f.name) === 'event');
+
+    const readCsv = async (file) => {
+      if (!file) return null;
+      try {
+        const blob = await downloadDriveFile(file.id, accessToken);
+        return await blob.text();
+      } catch (e) {
+        console.warn(`[CSV] ${file.name} 읽기 실패:`, e.message);
+        return null;
+      }
+    };
+
+    const [opText, dataText, evText] = await Promise.all([
+      readCsv(opFile), readCsv(dataFile), readCsv(evFile)
+    ]);
+
+    const { combineCsvResults } = await import('./csvService.js');
+    const parsed = combineCsvResults(opText, dataText, evText, vessel);
+    console.log('[CSV] 파싱 완료 — ops:', parsed.operations.length,
+      '/ tro:', parsed.tro_data ? 'OK' : 'null',
+      '/ alarms:', parsed.error_alarms.length,
+      '/ eventLogMissing:', parsed._event_log_missing);
+    return validateAndNormalizeResult(parsed, null);
+  }
 
   // 파일 종류 분류
   const filesByType = { total: [], data: [], event: [], optime: [], unknown: [] };
