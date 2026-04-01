@@ -8,7 +8,7 @@
 export const STAGE1_TEXT_SCHEMA = `{
   "vessel_name": "선박명",
   "imo_number": "IMO 번호 (없으면 null)",
-  "period": "분析 기간 (YYYY-MM)",
+  "period": "분석 기간 (YYYY-MM)",
   "manufacturer": "BWTS 제조사",
   "operations": [
     {
@@ -115,7 +115,7 @@ export const STAGE1_RESPONSE_SCHEMA = {
   required: ["operations", "error_alarms"],
 };
 
-// Stage 2: 분析 판정 결과 (overall_status enum 강제)
+// Stage 2: 분석 판정 결과 (overall_status enum 강제)
 export const STAGE2_RESPONSE_SCHEMA = {
   type: "object",
   properties: {
@@ -178,14 +178,14 @@ Event Log를 통째로 읽지 마세요. 전부 읽으려 하지 마세요.
 `}
 
 Step 1. 기본 정보
-- 선명, IMO 번호, 제조사, 분析 기간 추출
+- 선명, IMO 번호, 제조사, 분석 기간 추출
 
 Step 2. ECS Operation Time (최우선 — 운전 기준표) ← PHASE 1에서 처리
 - 섹션명: "ECS Operation Time", "Operation Time Log", "OperationTimeReport" 등
 - PHASE 0에서 확인한 위치로 직접 이동하여 추출 (앞의 Event Log 건너뜀)
 - 실제 컬럼: OPERATION │ START TIME │ END TIME │ RUNNING TIME(HH:MM) │ POSITION(GPS) │ VOLUME(m3) │ Line
 - 각 운전(BALLAST/DEBALLAST/STRIPPING)의 모든 행을 추출 (최대 30건)
-- ⚠️ 분析 기간(월) 전체를 스캔할 것. 특정 날짜에만 편중된 경우 재스캔
+- ⚠️ 분석 기간(월) 전체를 스캔할 것. 특정 날짜에만 편중된 경우 재스캔
 - GPS 포맷 예시: [34, 54.13, N][127, 40.19, E] → "34°54.13'N, 127°40.19'E" 형태로 합쳐서 표기
 - RUNNING TIME이 HH:MM 형식이면 소수 시간(hour)으로 변환하여 run_time 필드에 입력 (예: 0:34 → 0.57)
 - ⚠️ 날짜 유효성: 존재하지 않는 날짜(예: 비윤년의 2월 29일, 4월 31일 등)는 추출하지 말 것
@@ -544,17 +544,17 @@ ${extractedText}
 ${STAGE1_TEXT_SCHEMA}
 `.trim();
 
-// ── Stage 2: 분析 판정 전용 프롬프트 ────────────────────────
+// ── Stage 2: 분석 판정 전용 프롬프트 ────────────────────────
 export const ANALYSIS_PROMPT = (vessel = {}, extractedData = {}) => `
 당신은 테크로스(Techcross) 선박평형수처리장치(BWTS) 전문가입니다.
-아래 추출된 데이터를 분析하여 판정 및 요약을 JSON으로만 작성하세요.
+아래 추출된 데이터를 분석하여 판정 및 요약을 JSON으로만 작성하세요.
 JSON 외의 텍스트는 절대 포함하지 마세요.
 
 [선박 정보]
 - 선명: ${vessel.name || extractedData.vessel_name || "미상"}
 - BWTS 제조사: ${vessel.manufacturer || extractedData.manufacturer || "Techcross"}
 - BWTS 모델: ${vessel.model || "ECS"}
-- 분析 기간: ${extractedData.period || "미상"}
+- 분석 기간: ${extractedData.period || "미상"}
 
 [추출된 데이터]
 ${JSON.stringify(extractedData, null, 2)}

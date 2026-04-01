@@ -333,7 +333,7 @@ export default function VesselDetail({ vessel, onClose, isAdmin }) {
                 ["폴더 코드",   vessel.vesselCode],
                 ["BWTS 타입",   (() => { const mfr = r?.manufacturer || vessel.manufacturer; const mdl = vessel.model; return mfr && mdl ? `${mfr} (${mdl})` : mfr || mdl || null; })()],
                 ["수신 이메일", vessel.contactEmail],
-                ["분析 기간",   r?.period],
+                ["분석 기간",   r?.period],
               ].map(([k, v]) => v ? (
                 <div key={k} className="flex gap-2">
                   <dt className="text-slate-400 w-24 shrink-0">{k}</dt>
