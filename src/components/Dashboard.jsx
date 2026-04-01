@@ -210,7 +210,7 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
         const matched = vessels.some((v) =>
           d.vesselFolderName.toLowerCase().includes((v.vesselCode || v.name).toLowerCase())
         );
-        if (!matched) unmatchedFolders.push({ folderName: d.vesselFolderName, pdfs: d.pdfs.length });
+        if (!matched) unmatchedFolders.push({ folderName: d.vesselFolderName, pdfs: d.pdfs.length, csvs: d.csvFiles?.length ?? 0 });
       });
 
       setScanInfo({ total: monthData.length, matched: matchedFolders, unmatched: unmatchedFolders });
@@ -500,7 +500,9 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
                     {scanInfo.matched.map((m, i) => (
                       <span key={i} className="bg-teal-50 border border-teal-200 text-teal-700 rounded-lg px-2.5 py-1">
                         {m.vesselName} ← <span className="font-mono text-xs">{m.folderName}</span>
-                        <span className="ml-1.5 text-teal-500">PDF {m.pdfs}개</span>
+                        <span className="ml-1.5 text-teal-500">
+                          {m.csvs > 0 ? `CSV ${m.csvs}개` : `PDF ${m.pdfs}개`}
+                        </span>
                       </span>
                     ))}
                   </div>
@@ -513,7 +515,7 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
                     {scanInfo.unmatched.map((u, i) => (
                       <div key={i} className="flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1">
                         <span className="font-mono text-xs text-amber-800">{u.folderName}</span>
-                        <span className="text-amber-500 text-xs">PDF {u.pdfs}개</span>
+                        <span className="text-amber-500 text-xs">{(u.csvs ?? 0) > 0 ? `CSV ${u.csvs}개` : `PDF ${u.pdfs}개`}</span>
                         <button
                           onClick={() => addVesselFromFolder(u.folderName)}
                           className="ml-1 text-xs bg-amber-500 hover:bg-amber-600 text-white rounded px-1.5 py-0.5 font-medium"
