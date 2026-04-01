@@ -178,54 +178,79 @@ export function parseDataLogCsv(csvText) {
 
 /** 시계열 원본 방식: 행별로 BALLAST/DEBALLAST 판별 후 TRO 수집 */
 function _parseDataLogTimeSeries(rows, upper, opColIdx) {
-  // TRO_B* 컬럼 인덱스 (ballast TRO)
-  const troBIdx = upper.reduce((acc, h, i) => {
-    if (/^TRO[_-]?B\d*$/.test(h) || h === 'TRO1' || h === 'T1') acc.push(i);
-    return acc;
-  }, []);
-  // TRO_D* / TRO_S* 컬럼 인덱스 (deballast/stripping TRO)
-  const troDIdx = upper.reduce((acc, h, i) => {
-    if (/^TRO[_-]?D\d*$/.test(h) || /^TRO[_-]?S\d*$/.test(h) || h === 'TRO2' || h === 'T2') acc.push(i);
-    return acc;
-  }, []);
-  // ECU 전류 컬럼
-  const ecuIdx = upper.findIndex(h => /REC\d*_?CURRENT|ECU_?I$|^ECU$/.test(h) && !h.includes('VOLTAGE'));
-  // FMU 유량 컬럼
-  const fmuIdx = upper.findIndex(h => /^FMU\d*$/.test(h) && !h.includes('_ST'));
-  // ANU 컬럼
-  const anuIdx = upper.findIndex(h => /^ANU[_-]?[DS]\d+/.test(h));
+  // ── TRO 컬럼 동적 탐색 ─────────────────────────────────────
+  // 헤더에서 'TRO' 포함된 컬럼을 모두 찾아 접미사로 분류
+  //   TRO_B* → 주입 전용 센서 (type: 'ballast')
+  //   TRO_D* → 배출 전용 센서 (type: 'deballast')
+  //   TRO_S* → 스트리핑 전용 (type: 'deballast' 로 합산)
+  //   TRO_1, TRO_2, TRO 등 숫자/무접미사 → OPERATION 컬럼 값으로 판단 (type: 'auto')
+  const troCols = [];
+  for (let i = 0; i < upper.length; i++) {
+    const h = upper[i];
+    if (!h.includes('TRO') && h !== 'T1' && h !== 'T2') continue;
+    if (/TRO[_-]?B\d*/i.test(h))      troCols.push({ idx: i, type: 'ballast'   });
+    else if (/TRO[_-]?D\d*/i.test(h)) troCols.push({ idx: i, type: 'deballast' });
+    else if (/TRO[_-]?S\d*/i.test(h)) troCols.push({ idx: i, type: 'deballast' });
+    else                               troCols.push({ idx: i, type: 'auto'      });
+  }
+  console.log('[CSV/DataLog] TRO 컬럼 탐지:', troCols.map(c => `${upper[c.idx]}(${c.type})`).join(', ') || '없음');
+
+  // ECU 전류 / 전압 / FMU 유량 / ANU / 가스 / Bypass / CSU / FTS 컬럼
+  const ecuIdx     = upper.findIndex(h => /REC\d*_?(STATE_)?CURRENT/.test(h) && !h.includes('VOLTAGE'));
+  const voltIdx    = upper.findIndex(h => /REC\d*_?(STATE_)?VOLTAGE/.test(h));
+  const fmuIdx     = upper.findIndex(h => /^FMU\d*$/.test(h) && !h.includes('_ST') && !h.includes('_DT'));
+  const anuIdx     = upper.findIndex(h => /^ANU[_-]?[DS]\d+/.test(h));
+  const gasIdx     = upper.findIndex(h => /^GAS\d*$|^GDS\d*$/.test(h));
+  const bypassIdx  = upper.findIndex(h => /^BV\d*$|^TE02V$/.test(h));
+  const csuIdx     = upper.findIndex(h => /^CSU\d*$/.test(h));
+  const ftsIdx     = upper.findIndex(h => /^FTS\d*$/.test(h));
 
   const ballastTROs   = [];
   const deballastTROs = [];
   const ecuValues     = [];
   const fmuValues     = [];
+  const csuValues     = [];
+  const ftsValues     = [];
   let anuOp = 0, anuAll = 0;
+  let gasDetectedCount = 0;
+  let bypassCount = 0;
+  let zeroVoltageCount = 0;
+  let zeroCurrentCount = 0;
+  let ultraLowSalinityCount = 0;
 
   for (let i = 1; i < rows.length; i++) {
     const row = rows[i];
     if (!row[opColIdx]) continue;
 
-    const op         = row[opColIdx].trim().toUpperCase();
-    const isBallast  = op === 'BALLAST'   || op === 'N-B' || /^\d+-?B$/i.test(op);
-    const isDeballast= op === 'DEBALLAST' || op === 'N-D' || /^\d+-?D$/i.test(op);
-    const isStripping= op === 'STRIPPING' || op === 'N-S' || /^\d+-?S$/i.test(op);
+    const op          = row[opColIdx].trim().toUpperCase();
+    const isBallast   = op === 'BALLAST'   || op === 'N-B' || /^\d+-?B$/i.test(op);
+    const isDeballast = op === 'DEBALLAST' || op === 'N-D' || /^\d+-?D$/i.test(op);
+    const isStripping = op === 'STRIPPING' || op === 'N-S' || /^\d+-?S$/i.test(op);
     if (!isBallast && !isDeballast && !isStripping) continue;
 
-    if (isBallast) {
-      for (const ci of troBIdx) {
-        const v = parseFloat(row[ci]);
-        if (!isNaN(v) && v >= 0.1 && v <= 15) ballastTROs.push(v);
-      }
+    // TRO 수집: type='auto'는 현재 OPERATION으로 판단
+    for (const col of troCols) {
+      const v = parseFloat(row[col.idx]);
+      if (isNaN(v) || v < 0 || v > 15) continue;
+
+      const effectiveType = col.type === 'auto'
+        ? (isBallast ? 'ballast' : 'deballast')
+        : col.type;
+
+      if (effectiveType === 'ballast'   && isBallast              && v >= 0.1) ballastTROs.push(v);
+      if (effectiveType === 'deballast' && (isDeballast || isStripping))       deballastTROs.push(v);
     }
-    if (isDeballast || isStripping) {
-      for (const ci of troDIdx) {
-        const v = parseFloat(row[ci]);
-        if (!isNaN(v) && v >= 0 && v <= 15) deballastTROs.push(v);
-      }
-    }
+
     if (ecuIdx >= 0) {
       const v = parseFloat(row[ecuIdx]);
       if (!isNaN(v) && v > 50) ecuValues.push(v);
+      // 전류=0 이면서 운전 중 → 이상
+      if (!isNaN(v) && v === 0) zeroCurrentCount++;
+    }
+    if (voltIdx >= 0) {
+      const v = parseFloat(row[voltIdx]);
+      // 전압=0 이면서 운전 중 → 이상
+      if (!isNaN(v) && v === 0) zeroVoltageCount++;
     }
     if (fmuIdx >= 0) {
       const v = parseFloat(row[fmuIdx]);
@@ -234,6 +259,25 @@ function _parseDataLogTimeSeries(rows, upper, opColIdx) {
     if (anuIdx >= 0) {
       const v = parseFloat(row[anuIdx]);
       if (!isNaN(v)) { anuAll++; if (v > 0) anuOp++; }
+    }
+    if (gasIdx >= 0) {
+      const v = parseFloat(row[gasIdx]);
+      if (!isNaN(v) && v > 0) gasDetectedCount++;
+    }
+    if (bypassIdx >= 0) {
+      const v = parseFloat(row[bypassIdx]);
+      if (!isNaN(v) && v === 1) bypassCount++;
+    }
+    if (csuIdx >= 0) {
+      const v = parseFloat(row[csuIdx]);
+      if (!isNaN(v) && v > 0) {
+        csuValues.push(v);
+        if (v < 5) ultraLowSalinityCount++;
+      }
+    }
+    if (ftsIdx >= 0) {
+      const v = parseFloat(row[ftsIdx]);
+      if (!isNaN(v) && v > 0) ftsValues.push(v);
     }
   }
 
@@ -244,15 +288,23 @@ function _parseDataLogTimeSeries(rows, upper, opColIdx) {
   // Warm-up 첫 5행 제외 후 최솟값
   const stableArr = ballastTROs.slice(5);
 
-  console.log(`[CSV/DataLog] ballastTRO:${ballastTROs.length}건 / deballastTRO:${deballastTROs.length}건`);
+  console.log(`[CSV/DataLog] ballastTRO:${ballastTROs.length}건 / deballastTRO:${deballastTROs.length}건 / gas:${gasDetectedCount} / bypass:${bypassCount}`);
 
   return {
-    ballasting_avg:   avg(ballastTROs),
-    ballasting_min:   min(stableArr.length > 0 ? stableArr : ballastTROs),
-    deballasting_max: max(deballastTROs),
-    ecu_current_avg:  avg(ecuValues),
-    fmu_flow_avg:     avg(fmuValues),
-    anu_status: anuAll > 0 ? (anuOp / anuAll > 0.3 ? 'Operating' : 'Standby') : null,
+    ballasting_avg:        avg(ballastTROs),
+    ballasting_min:        min(stableArr.length > 0 ? stableArr : ballastTROs),
+    deballasting_max:      max(deballastTROs),
+    ecu_current_avg:       avg(ecuValues),
+    fmu_flow_avg:          avg(fmuValues),
+    anu_status:            anuAll > 0 ? (anuOp / anuAll > 0.3 ? 'Operating' : 'Standby') : null,
+    // 이상값 탐지 (분析 프롬프트에서 활용)
+    csu_avg:               avg(csuValues),
+    fts_avg:               avg(ftsValues),
+    gasDetectedCount,
+    bypassCount,
+    zeroVoltageCount,
+    zeroCurrentCount,
+    ultraLowSalinityCount,
   };
 }
 
@@ -282,60 +334,95 @@ function _parseDataLogSummary(rows, upper) {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// EVENTLOG.CSV → error_alarms[] (Trip / Alarm / Warning만 수집)
+// EVENTLOG.CSV → { alarms[], wrongTerminationCount, gpsTimeSetCount }
+//
+// 실제 CSV 구조:
+//   DATE, DEVICE, LEVEL, DESCRIPTION, ACK.TIME(또는 Ack.Time), RESET.TIME(또는 Reset.Time), CLEAR
+//   알람코드는 별도 컬럼 없이 DESCRIPTION 안에 "[CODE201]..." 형식으로 포함
+//   CLEAR: 'X' = 완료, 'O' = 미완료
 // ─────────────────────────────────────────────────────────────────
 
 /**
- * EVENTLOG.CSV → error_alarms[]
- * Normal 레벨은 제외 — Trip / Alarm / Warning만 수집
+ * EVENTLOG.CSV → { alarms, wrongTerminationCount, gpsTimeSetCount }
+ * - Trip / Alarm / Warning만 alarms에 수집
+ * - Normal 중 비정상종료·GPS시간보정 횟수 별도 카운트
+ * - 미확인(acked=false), 미리셋(reset=false), 미완료(cleared=false) 플래그 포함
  */
 export function parseEventLogCsv(csvText) {
   const rows = parseCsvRows(csvText);
-  if (rows.length < 2) return [];
+
+  // 페이지 과도 CSV (KCN 등 대용량)
+  if (rows.length <= 2) {
+    const firstCell = (rows[0]?.[0] || '').trim();
+    if (firstCell.includes('페이지 과도')) {
+      return { alarms: [], wrongTerminationCount: 0, gpsTimeSetCount: 0, _overflow: true };
+    }
+  }
+  if (rows.length < 2) return { alarms: [], wrongTerminationCount: 0, gpsTimeSetCount: 0 };
 
   const headerRow = rows[0];
   const cols = detectColumns(headerRow, {
     date:        ['DATE', '날짜'],
-    time:        ['TIME', '시간'],
     level:       ['LEVEL', 'TYPE', '종류'],
-    code:        ['CODE', '코드'],
-    description: ['DESC', 'DETAIL', '내용', 'DESCRIPTION'],
+    description: ['DESCRIPTION', 'DESC', 'DETAIL', '내용'],
     device:      ['DEVICE', '장치', 'MODULE'],
+    ack:         h => /ACK/i.test(h),          // ACK.TIME / Ack.Time
+    reset:       h => /RESET/i.test(h),        // RESET.TIME / Reset.Time
+    clear:       h => /^CLEAR$/i.test(h),      // CLEAR
   });
 
   const alarms = [];
+  let wrongTerminationCount = 0;
+  let gpsTimeSetCount = 0;
+
   for (let i = 1; i < rows.length; i++) {
     const row = rows[i];
     if (row.length < 2) continue;
     const get = (f) => (cols[f] != null ? (row[cols[f]] || '').trim() : null);
 
-    // 레벨 정규화
     const rawLevel = (get('level') || '').toUpperCase();
+    const desc     = (get('description') || '').trim();
+
+    // Normal 레벨: 특이 패턴만 카운트
+    if (/^NORMAL$/.test(rawLevel)) {
+      if (desc.includes('terminated in the wrong way')) wrongTerminationCount++;
+      if (desc.includes('GPS Time Set'))                gpsTimeSetCount++;
+      continue;
+    }
+
     let level;
-    if (/TRIP|FAULT/.test(rawLevel))    level = 'Trip';
-    else if (/ALARM|알람/.test(rawLevel)) level = 'Alarm';
-    else if (/WARN/.test(rawLevel))      level = 'Warning';
-    else continue; // Normal / 기타 → 무시
+    if (/TRIP|FAULT/.test(rawLevel))      level = 'Trip';
+    else if (/ALARM|알람/.test(rawLevel))  level = 'Alarm';
+    else if (/WARN/.test(rawLevel))        level = 'Warning';
+    else continue;
 
-    // 코드 정규화: "200" / "[CODE200]" / "CODE 200" / "CODE200" → "CODE200"
-    const rawCode = get('code') || '';
-    const m = rawCode.match(/CODE\s*(\d+)/i) || rawCode.match(/^\[?(\d+)\]?$/);
-    const code = m ? `CODE${m[1]}` : (rawCode || null);
+    // DESCRIPTION에서 [CODE###] 패턴 추출 (실제 데이터: "[CODE201]TRO Concentration High.[0.11]")
+    const codeMatch = desc.match(/\[CODE(\d+)\]/i);
+    const code = codeMatch ? `CODE${codeMatch[1]}` : null;
 
-    const desc = get('description');
-    if (!code && !desc) continue;
+    // 코드 제거한 순수 설명
+    const cleanDesc = desc.replace(/\[CODE\d+\]/gi, '').replace(/^\s*[-–]\s*/, '').trim();
+
+    const ackVal   = get('ack')   || '-';
+    const resetVal = get('reset') || '-';
+    const clearVal = get('clear') || '';
+
+    if (!code && !cleanDesc) continue;
 
     alarms.push({
       date:        get('date') || null,
-      time:        get('time') || null,
       level,
       code,
-      description: desc || null,
+      description: cleanDesc || desc,
       device:      get('device') || null,
+      acked:       ackVal !== '-' && ackVal !== '',    // false = 미확인
+      reset:       resetVal !== '-' && resetVal !== '', // false = 미리셋
+      cleared:     clearVal === 'X',                   // false = 미완료(O)
       count:       1,
     });
   }
-  return alarms;
+
+  return { alarms, wrongTerminationCount, gpsTimeSetCount };
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -350,9 +437,33 @@ export function parseEventLogCsv(csvText) {
  * @param {object}      vessel    - { name, year, month, imo, vesselFolderName }
  */
 export function combineCsvResults(opText, dataText, evText, vessel = {}) {
-  const operations   = opText   ? parseOpTimeCsv(opText)   : [];
-  const tro_data     = dataText ? parseDataLogCsv(dataText) : null;
-  const error_alarms = evText   ? parseEventLogCsv(evText)  : [];
+  const operations = opText   ? parseOpTimeCsv(opText)   : [];
+  const tro_data   = dataText ? parseDataLogCsv(dataText) : null;
+
+  // parseEventLogCsv 반환값: { alarms, wrongTerminationCount, gpsTimeSetCount, _overflow? }
+  const evResult   = evText   ? parseEventLogCsv(evText)  : null;
+  const error_alarms = evResult ? evResult.alarms : [];
+
+  // 이벤트 로그 통계 (ANALYSIS_PROMPT에서 활용)
+  const event_log_stats = evResult ? {
+    unacknowledged:       error_alarms.filter(a => !a.acked).length,
+    unreset:              error_alarms.filter(a => !a.reset).length,
+    incomplete:           error_alarms.filter(a => !a.cleared).length,
+    wrongTermination:     evResult.wrongTerminationCount || 0,
+    gpsTimeSet:           evResult.gpsTimeSetCount || 0,
+    overflow:             evResult._overflow || false,
+  } : null;
+
+  // 데이터 로그 이상값 플래그 (tro_data에서 분리)
+  const data_log_flags = tro_data ? {
+    gasDetectedCount:      tro_data.gasDetectedCount      || 0,
+    bypassCount:           tro_data.bypassCount           || 0,
+    zeroVoltageCount:      tro_data.zeroVoltageCount      || 0,
+    zeroCurrentCount:      tro_data.zeroCurrentCount      || 0,
+    ultraLowSalinityCount: tro_data.ultraLowSalinityCount || 0,
+    csu_avg:               tro_data.csu_avg               || null,
+    fts_avg:               tro_data.fts_avg               || null,
+  } : null;
 
   const period = (vessel.year && vessel.month)
     ? `${vessel.year}-${String(vessel.month).padStart(2, '0')}`
@@ -365,6 +476,8 @@ export function combineCsvResults(opText, dataText, evText, vessel = {}) {
     operations,
     tro_data,
     error_alarms,
+    event_log_stats,
+    data_log_flags,
     _event_log_missing: evText == null,
   };
 }
