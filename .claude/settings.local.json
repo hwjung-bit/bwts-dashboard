@@ -18,7 +18,9 @@
       "Bash(where npm:*)",
       "mcp__Claude_Preview__preview_start",
       "Read(//c/Users/user/AppData/Roaming/Claude/**)",
-      "Bash(find '/d/CLAUDE CODE/bwts-dashboard/.claude/worktrees/zen-chatelet' -name *.md)"
+      "Bash(find '/d/CLAUDE CODE/bwts-dashboard/.claude/worktrees/zen-chatelet' -name *.md)",
+      "Bash(gh pr:*)",
+      "Bash(where gh:*)"
     ]
   }
 }
