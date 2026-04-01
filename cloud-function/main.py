@@ -42,7 +42,7 @@ def _json_response(data, status=200, origin=""):
 def _get_file_metadata(file_id, access_token):
     """Drive API로 파일 메타데이터 조회"""
     url = f"https://www.googleapis.com/drive/v3/files/{file_id}"
-    params = {"fields": "name,size,mimeType"}
+    params = {"fields": "name,size,mimeType", "supportsAllDrives": "true"}
     headers = {"Authorization": f"Bearer {access_token}"}
     res = requests.get(url, params=params, headers=headers)
     res.raise_for_status()
@@ -52,7 +52,7 @@ def _get_file_metadata(file_id, access_token):
 def _download_pdf(file_id, access_token):
     """Drive API로 PDF 바이너리 다운로드"""
     url = f"https://www.googleapis.com/drive/v3/files/{file_id}"
-    params = {"alt": "media"}
+    params = {"alt": "media", "supportsAllDrives": "true"}
     headers = {"Authorization": f"Bearer {access_token}"}
     res = requests.get(url, params=params, headers=headers)
     res.raise_for_status()
