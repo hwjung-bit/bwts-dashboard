@@ -1,6 +1,9 @@
 # API 키 보호 — 이 파일은 GitHub에 올리지 않음
 src/config.js
 
+# Claude Code 로컬 설정 (자동 변경됨)
+.claude/settings.local.json
+
 # Logs
 logs
 *.log
