@@ -289,58 +289,158 @@ function checkZeroOperations(data) {
   }
 }
 
-// ── 알람 코드별 권고 조치 룩업 (상세 원인 + 조치) ───────────────
-const ALARM_ACTION_KO = {
-  CODE100:      "ECU 비상정지(EMCY) — 전극 과열/과압/전류 이상 가능성. ECU 내부 점검 및 PRU(정류기) 상태 확인. 반복 시 제조사 정밀 진단 필요",
-  CODE200:      "TRO 저농도(Low) — CLX 시약 유효기간 만료 또는 TSU Bypass Line 막힘 가능성. CLX 시약 교체 여부 및 샘플링 라인 소통 상태 점검",
-  CODE201:      "TRO 고농도(High) — 중화제(STS) 주입량 부족 가능성. STS 주입 펌프 작동 상태 및 탱크 잔량 확인. ANU 밸브 개폐 점검",
-  CODE301:      "중화제 탱크 초기 레벨 이상 — 레벨 센서 영점 교정 필요. 센서 배선 및 탱크 내부 플로트 상태 확인",
-  CODE302:      "중화제 탱크 저수위 — 중화제 보충 필요. 레벨 센서 정상 작동 여부 및 공급 라인 밸브 개폐 확인",
-  CODE303:      "중화제 탱크 고수위 — 오버플로우 방지 밸브 작동 확인. 레벨 센서 고착 여부 및 배출 라인 점검",
-  CODE402:      "440V MC(전자접촉기) 투입 실패 — 전원 공급 상태 및 MC 코일/접점 점검. 전원 차단기(MCCB) 트립 여부 확인",
-  CODE405:      "ECU 전류 과부하 — 전극 표면 스케일 부착 또는 해수 염분도 급변 가능성. 전극 세정(CIP) 실시 및 CSU 센서값 확인",
-  CODE406:      "ECU 입력 전압 저하 — 선내 배전반 전압 확인. 발전기 부하 상태 및 전압 조정기(AVR) 점검",
-  CODE407:      "ECU 입력 전압 과다 — 선내 배전반 전압 확인. 발전기 AVR 설정값 점검",
-  CODE600:      "해수 온도 저온 이상 — 저온 해역 운항 시 정상 발생 가능. 히터 작동 여부 확인. 지속 시 운전 모드 조정",
-  CODE603:      "냉각수 온도 과열 — 냉각수 펌프 작동 및 냉각수 라인 밸브 개폐 확인. 열교환기 오염 여부 점검",
-  CODE605:      "FMU 유량 과다(>110%) — 단속 운전 유발 가능. 유량 조절 밸브 개도 확인 및 FMU 센서 교정 점검",
-  CODE606:      "FMU 유량 부족(<15%) — 해수 공급 펌프 작동 확인. 스트레이너 막힘 및 흡입 밸브 개폐 점검",
-  CODE701:      "PLC 통신 장애 — RTU/AIM 모듈 간 통신 케이블 연결 상태 확인. 커넥터 접촉 불량 및 모듈 LED 상태 점검",
-  CODE703:      "센서 통신 에러 — 해당 센서 배선 및 커넥터 점검. 센서 모듈 교체 필요 여부 확인",
-  CODE704:      "Bypass 밸브 이상 — 밸브 리미트 스위치 위치 및 공압 라인 점검. 수동 개폐 테스트 실시",
-  CODE706:      "비상 운전(EM'CY Mode) 진입 — 자동 운전 불가 상태. 원인 알람 확인 후 리셋 및 정상 모드 복귀",
-  CODE721:      "밸브 작동 이상 — 해당 밸브 공압 실린더 및 리미트 스위치 점검. 솔레노이드 밸브 작동 확인",
-  CODE727:      "[긴급] 미처리수 배출 감지 — IMO 규정 위반 가능성. 즉시 운전 중지 후 밸브 라인업 및 TRO 센서 확인",
-  CODE731:      "밸브 비정상 종료 — 밸브 작동 중 ECS 비정상 종료 발생. 밸브 현재 위치 확인 후 수동 리셋",
-  CODE774:      "냉각수 밸브(F.W Inlet) 이상 — 냉각수 공급 밸브 리미트 스위치 및 공압 점검. 냉각수 라인 에어 벤트 확인",
-  VRCS_ERR:     "[긴급] 밸브 채터링(반복 개폐) 감지 — 공압 라인 누기, 리미트 스위치 고장, 솔레노이드 밸브 이상 가능성. 즉각 점검 필요",
-  LOG_OVERFLOW: "Event Log 100건 초과 — 반복 알람 원인 분석 및 전체 로그 상세 검토 필요",
-};
-const ALARM_ACTION_EN = {
-  CODE100:      "ECU Emergency Stop — possible electrode overheating/overpressure. Inspect ECU internals and PRU(rectifier) status. Contact manufacturer if recurring",
-  CODE200:      "TRO Low — possible CLX reagent expiry or TSU bypass line blockage. Check CLX replacement date and sampling line flow",
-  CODE201:      "TRO High — possible insufficient STS neutralizer dosing. Check STS pump operation and tank level. Inspect ANU valve",
-  CODE301:      "Neutralizer tank initial level error — recalibrate level sensor zero point. Check sensor wiring and float condition",
-  CODE302:      "Neutralizer tank low level — replenish neutralizer. Check level sensor and supply line valves",
-  CODE303:      "Neutralizer tank high level — check overflow prevention valve. Inspect level sensor and drain line",
-  CODE402:      "440V MC engagement failure — check power supply and MC coil/contacts. Verify MCCB trip status",
-  CODE405:      "ECU overcurrent — possible electrode scaling or sudden salinity change. Perform CIP cleaning and check CSU sensor",
-  CODE406:      "ECU input voltage low — check switchboard voltage and generator AVR settings",
-  CODE407:      "ECU input voltage high — check switchboard voltage and generator AVR settings",
-  CODE600:      "Seawater temperature low — may be normal in cold water areas. Check heater operation",
-  CODE603:      "Cooling water temperature high — check cooling pump and heat exchanger fouling",
-  CODE605:      "FMU flow rate high (>110%) — may cause intermittent operation. Check flow control valve and FMU calibration",
-  CODE606:      "FMU flow rate low (<15%) — check seawater pump, strainer blockage, and suction valve",
-  CODE701:      "PLC communication failure — check RTU/AIM module cables and connectors. Inspect module LED status",
-  CODE703:      "Sensor communication error — check sensor wiring and connectors. Assess module replacement need",
-  CODE704:      "Bypass valve error — check valve limit switch and pneumatic line. Perform manual open/close test",
-  CODE706:      "Emergency mode entered — auto operation unavailable. Check root cause alarm, reset and return to normal mode",
-  CODE721:      "Valve operation error — check pneumatic cylinder and limit switch. Verify solenoid valve operation",
-  CODE727:      "[URGENT] Untreated water discharge detected — possible IMO violation. Stop operation immediately and check valve lineup and TRO sensor",
-  CODE731:      "Valve abnormal termination — ECS shut down during valve operation. Verify valve position and manual reset",
-  CODE774:      "Cooling water inlet valve error — check F.W valve limit switch and pneumatic line. Vent air from cooling line",
-  VRCS_ERR:     "[URGENT] Valve chattering detected — possible pneumatic leak, limit switch failure, or solenoid valve malfunction. Immediate inspection required",
-  LOG_OVERFLOW: "Event Log exceeded 100 entries — analyze repeated alarm root cause and perform detailed log review",
+// ── 알람 코드 정보 (Techcross 매뉴얼 Alarm_Fault_List v3.4 기준) ──
+const ALARM_INFO = {
+  CODE100: {
+    title: "ECU 비상정지",                    titleEn: "ECU Emergency Stop",
+    action: "ECU 내부 점검 — 전류 과부하(>PRU×1125A), 고압(>4.5bar), 고온(>45°C), VLS 에러 가능성. PRU 상태 및 전극 확인",
+    actionEn: "Inspect ECU — overcurrent(>PRU×1125A), high pressure(>4.5bar), high temp(>45°C), or VLS error. Check PRU and electrode status",
+  },
+  CODE200: {
+    title: "TRO 저농도",                      titleEn: "TRO Concentration Low",
+    action: "Ballast 중 TRO <5mg/L (3회 연속 시 발생). CLX 시약 유효기간 및 TSU Bypass Line 소통 상태 점검",
+    actionEn: "TRO <5mg/L during ballasting (triggered after 3 consecutive readings). Check CLX reagent date and TSU bypass line",
+  },
+  CODE201: {
+    title: "TRO 고농도",                      titleEn: "TRO Concentration High",
+    action: "Ballast >10mg/L 또는 Deballast >0.1mg/L(IMO)/>0.07mg/L(USCG). STS 주입 펌프 및 ANU 탱크 레벨 확인",
+    actionEn: "Ballast >10mg/L or Deballast >0.1mg/L(IMO)/>0.07mg/L(USCG). Check STS pump and ANU tank level",
+  },
+  CODE301: {
+    title: "중화제 탱크 초기충전",              titleEn: "ANU Tank Initial Fill",
+    action: "중화제(NaCl) 초기 충전 필요. 레벨 센서 영점 교정 및 탱크 상태 확인",
+    actionEn: "Neutralizer(NaCl) initial fill required. Recalibrate level sensor and check tank condition",
+  },
+  CODE302: {
+    title: "중화제 탱크 저수위",               titleEn: "ANU Tank Level Low",
+    action: "중화제 보충 필요. 레벨 센서 및 공급 라인 밸브 점검",
+    actionEn: "Replenish neutralizer. Check level sensor and supply line valves",
+  },
+  CODE303: {
+    title: "중화제 탱크 고수위",               titleEn: "ANU Tank Level High",
+    action: "오버플로우 방지 밸브 및 배출 라인 점검. 레벨 센서 고착 여부 확인",
+    actionEn: "Check overflow prevention valve and drain line. Inspect level sensor for stuck condition",
+  },
+  CODE400: {
+    title: "PDE 비상정지",                    titleEn: "PDE Emergency Stop",
+    action: "운전자에 의한 긴급 정지. PDE 상태 확인 후 원인 조치 및 리셋",
+    actionEn: "Emergency stop by operator. Check PDE status, address root cause and reset",
+  },
+  CODE402: {
+    title: "440V MC 투입 실패",               titleEn: "440V MC Fail",
+    action: "전자접촉기(MC) 고장. 전원 공급 상태, MC 코일/접점, MCCB 트립 여부 점검",
+    actionEn: "Magnet contactor malfunction. Check power supply, MC coil/contacts, MCCB trip status",
+  },
+  CODE405: {
+    title: "ECU 전류 과부하",                  titleEn: "ECU Current High",
+    action: "전류 >PRU×1125A. 전극 스케일 부착 또는 해수 염분 급변 가능성. CIP 세정 및 CSU 센서 확인",
+    actionEn: "Current >PRU×1125A. Possible electrode scaling or salinity change. Perform CIP and check CSU",
+  },
+  CODE406: {
+    title: "입력 전압 저하",                   titleEn: "Input Voltage Low",
+    action: "입력 전압 <374V(440V-15%) Alarm, <352V(440V-20%) Fault. 배전반 전압 및 발전기 AVR 점검",
+    actionEn: "Input voltage <374V(-15%) Alarm, <352V(-20%) Fault. Check switchboard voltage and generator AVR",
+  },
+  CODE407: {
+    title: "입력 전압 과다",                   titleEn: "Input Voltage High",
+    action: "입력 전압 >506V(440V+15%) Alarm, >528V(440V+20%) Fault. 배전반 전압 및 발전기 AVR 점검",
+    actionEn: "Input voltage >506V(+15%) Alarm, >528V(+20%) Fault. Check switchboard voltage and generator AVR",
+  },
+  CODE503: {
+    title: "펌프 신호 미확인",                  titleEn: "Pump Signal Not Confirmed",
+    action: "해수/담수 펌프 운전 신호 미수신. 1분 지속 시 Shutdown. 펌프 기동 상태 및 신호 배선 점검",
+    actionEn: "S.W/F.W pump signal not confirmed. Shutdown after 1 min. Check pump start status and signal wiring",
+  },
+  CODE601: {
+    title: "해수 온도 과열",                   titleEn: "Seawater Temp High",
+    action: "해수 온도 >36°C. 해수 흡입 라인 및 온도 센서 점검. 고온 해역 운항 시 정상 발생 가능",
+    actionEn: "Seawater temp >36°C. Check seawater intake line and temp sensor. May be normal in warm waters",
+  },
+  CODE603: {
+    title: "냉각수 온도 과열",                  titleEn: "Cooling Water Temp High",
+    action: "냉각수 >43°C Alarm, >45°C Fault. 냉각수 펌프, 열교환기 오염, 냉각수 라인 밸브 점검",
+    actionEn: "Cooling water >43°C Alarm, >45°C Fault. Check cooling pump, heat exchanger fouling, line valves",
+  },
+  CODE604: {
+    title: "유량 저하",                        titleEn: "FMU Flow Rate Low",
+    action: "유량 <15% (3분 지속 Alarm, 5분 Fault). 해수 펌프, 스트레이너 막힘, 흡입 밸브 점검",
+    actionEn: "Flow rate <15% (3min Alarm, 5min Fault). Check seawater pump, strainer blockage, suction valve",
+  },
+  CODE605: {
+    title: "유량 과다",                        titleEn: "FMU Flow Rate High",
+    action: "유량 >110% (저염분 Mixing 시 >80%). 3분 지속 Alarm, 5분 Fault. 유량 조절 밸브 및 FMU 센서 점검",
+    actionEn: "Flow rate >110% (Mixing >80%). 3min Alarm, 5min Fault. Check flow control valve and FMU calibration",
+  },
+  CODE606: {
+    title: "수소가스 감지",                     titleEn: "H2 Gas Detected",
+    action: ">25%LEL Alarm, >50%LEL Fault(Shutdown). 전해조 가스 누출 점검. 환기 팬 작동 확인",
+    actionEn: ">25%LEL Alarm, >50%LEL Fault(Shutdown). Check electrolyzer gas leak. Verify ventilation fan operation",
+  },
+  CODE607: {
+    title: "저염분 감지",                      titleEn: "CSU Conductivity Low",
+    action: "염분 <1.0PSU (1분 지속 Alarm, 2분 Fault). 저염분 해역 운항 시 처리 효율 저하. CSU 센서 점검",
+    actionEn: "Salinity <1.0PSU (1min Alarm, 2min Fault). Low efficiency in low-salinity waters. Check CSU sensor",
+  },
+  CODE600: {
+    title: "해수 온도 저온",                   titleEn: "Seawater Temp Low",
+    action: "저온 해역 운항 시 정상 발생 가능. 히터 작동 여부 확인. 지속 시 운전 모드 조정",
+    actionEn: "May be normal in cold water areas. Check heater operation. Adjust operating mode if persistent",
+  },
+  CODE701: {
+    title: "통신 장애",                        titleEn: "Communication Fail",
+    action: "ECS 장비 간 통신 두절. 1분 지속 시 Shutdown. RTU/AIM 모듈 케이블 및 커넥터 점검",
+    actionEn: "Communication failure between ECS devices. Shutdown after 1min. Check RTU/AIM cables and connectors",
+  },
+  CODE703: {
+    title: "센서 통신 에러",                    titleEn: "Sensor Communication Error",
+    action: "해당 센서 배선 및 커넥터 점검. 센서 모듈 교체 필요 여부 확인",
+    actionEn: "Check sensor wiring and connectors. Assess module replacement need",
+  },
+  CODE704: {
+    title: "Bypass 밸브 개방",                 titleEn: "Bypass Valve Opened",
+    action: "Ballast 운전 중 Bypass 밸브 개방. 미처리수 유입 가능. 밸브 리미트 스위치 및 공압 라인 점검",
+    actionEn: "Bypass valve opened during ballasting. Untreated water may flow. Check limit switch and pneumatic line",
+  },
+  CODE706: {
+    title: "비상운전 모드 진입",                 titleEn: "Emergency Mode",
+    action: "자동 운전 불가 상태. RCM 셀렉트 스위치 변경 또는 원인 알람 확인 후 리셋",
+    actionEn: "Auto operation unavailable. Check RCM select switch or root cause alarm, then reset",
+  },
+  CODE721: {
+    title: "밸브 작동 이상",                    titleEn: "Valve Operation Error",
+    action: "밸브 공압 실린더, 리미트 스위치, 솔레노이드 밸브 점검",
+    actionEn: "Check valve pneumatic cylinder, limit switch, solenoid valve",
+  },
+  CODE727: {
+    title: "[긴급] 미처리수 배출",               titleEn: "[URGENT] Untreated Water Discharge",
+    action: "IMO 규정 위반 가능성. 즉시 운전 중지 후 밸브 라인업 및 TRO 센서 확인",
+    actionEn: "Possible IMO violation. Stop operation immediately and check valve lineup and TRO sensor",
+  },
+  CODE731: {
+    title: "밸브 비정상 종료",                   titleEn: "Valve Abnormal Stop",
+    action: "밸브 작동 중 ECS 비정상 종료. 밸브 현재 위치 확인 후 수동 리셋",
+    actionEn: "ECS shut down during valve operation. Verify valve position and manual reset",
+  },
+  CODE734: {
+    title: "탄화수소 가스 감지",                 titleEn: "Hydrocarbon Gas Detected",
+    action: "탄화수소 가스 감지 — 즉시 Fault(Shutdown). 가스 누출원 확인 및 환기 점검",
+    actionEn: "Hydrocarbon gas detected — immediate Fault(Shutdown). Check gas leak source and ventilation",
+  },
+  CODE774: {
+    title: "냉각수 밸브 이상",                   titleEn: "Cooling Water Valve Error",
+    action: "냉각수 공급 밸브(F.W Inlet) 리미트 스위치 및 공압 점검. 에어 벤트 확인",
+    actionEn: "Check F.W inlet valve limit switch and pneumatic line. Vent air from cooling line",
+  },
+  VRCS_ERR: {
+    title: "[긴급] 밸브 채터링",                 titleEn: "[URGENT] Valve Chattering",
+    action: "밸브 반복 개폐 감지. 공압 라인 누기, 리미트 스위치, 솔레노이드 밸브 즉각 점검",
+    actionEn: "Repeated valve open/close detected. Immediately inspect pneumatic line, limit switch, solenoid valve",
+  },
+  LOG_OVERFLOW: {
+    title: "Event Log 과다",                    titleEn: "Event Log Overflow",
+    action: "Event Log 100건 초과. 반복 알람 원인 분석 및 전체 로그 상세 검토 필요",
+    actionEn: "Event Log exceeded 100 entries. Analyze repeated alarm root cause and perform detailed log review",
+  },
 };
 
 // ── ai_remarks 종합 리포트 생성 (Stage 2 AI 대체) ────────────
@@ -450,10 +550,16 @@ function autoFillRemarks(data) {
     }
     for (const [code, g] of codeMap) {
       const nonTrips = g.total - g.trips;
-      const parts = [g.trips && `Trip×${g.trips}`, nonTrips && `Alarm×${nonTrips}`].filter(Boolean).join("+");
-      const countStr = parts ? `${parts} — ` : "";
-      koLines.push(`[${code}] ${countStr}${ALARM_ACTION_KO[code] || "점검 필요 — 상세 원인 확인 후 제조사 기술지원 요청"}.`);
-      enLines.push(`[${code}] ${countStr}${ALARM_ACTION_EN[code] || "Inspection required — identify root cause and contact manufacturer for technical support"}.`);
+      const cntParts = [g.trips && `Trip ${g.trips}건`, nonTrips && `Alarm ${nonTrips}건`].filter(Boolean).join(", ");
+      const cntPartsEn = [g.trips && `Trip×${g.trips}`, nonTrips && `Alarm×${nonTrips}`].filter(Boolean).join("+");
+      const info = ALARM_INFO[code];
+      if (info) {
+        koLines.push(`${info.title} (${cntParts}) — ${info.action} [${code}]`);
+        enLines.push(`${info.titleEn} (${cntPartsEn}) — ${info.actionEn} [${code}]`);
+      } else {
+        koLines.push(`${code} (${cntParts}) — 점검 필요. 상세 원인 확인 후 제조사 기술지원 요청`);
+        enLines.push(`${code} (${cntPartsEn}) — Inspection required. Identify root cause and contact manufacturer`);
+      }
     }
 
     // 반복 알람 경고 (5회 이상)
