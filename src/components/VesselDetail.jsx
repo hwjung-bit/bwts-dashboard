@@ -373,13 +373,13 @@ export default function VesselDetail({ vessel, onClose, isAdmin }) {
               {/* 알람 요약 테이블 */}
               {r.alarm_summary && r.alarm_summary.length > 0 && (
                 <div className="overflow-x-auto">
-                  <table className="w-full text-xs border-collapse">
+                  <table className="w-full text-xs border-collapse table-fixed">
                     <thead>
                       <tr className="bg-blue-100/60 text-blue-700">
-                        <th className="text-left px-2 py-1.5 rounded-tl-lg">구분</th>
-                        <th className="text-center px-2 py-1.5 w-16">Trip</th>
-                        <th className="text-center px-2 py-1.5 w-16">Alarm</th>
-                        <th className="text-left px-2 py-1.5">관련 코드</th>
+                        <th className="text-left px-2 py-1.5 rounded-tl-lg w-[72px]">구분</th>
+                        <th className="text-center px-1 py-1.5 w-[32px]">T</th>
+                        <th className="text-center px-1 py-1.5 w-[32px]">A</th>
+                        <th className="text-left px-2 py-1.5 w-[30%]">관련 코드</th>
                         <th className="text-left px-2 py-1.5 rounded-tr-lg">조치 사항</th>
                       </tr>
                     </thead>
