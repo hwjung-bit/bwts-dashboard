@@ -395,10 +395,21 @@ export function parseOpTimeCsv(csvText) {
   });
   console.log('[CSV/OpTime] 컬럼 매핑:', JSON.stringify(cols));
 
+  // 반복 헤더/메타데이터 행 판별 함수
+  const isHeaderOrMeta = (row) => {
+    const first = (row[0] || '').toUpperCase().trim();
+    // 반복 헤더: OPERATION + START/TIME 조합
+    if (first === 'OPERATION' && row.some(c => (c || '').toUpperCase().includes('TIME'))) return true;
+    // 메타데이터 행: 페이지 번호, 선명, 날짜, 통계 등
+    if (/^(ECS |SHIP |OPERATION DATE|TOTAL TIME|BALLAST TIME|DEBALLAST TIME|STRIPPING TIME|MAKE DATE|- \d)/i.test(first)) return true;
+    return false;
+  };
+
   const operations = [];
   for (let i = headerIdx + 1; i < rows.length; i++) {
     const row = rows[i];
     if (row.length < 2) continue;
+    if (isHeaderOrMeta(row)) continue; // 반복 헤더/메타데이터 skip
     const get = (f) => (cols[f] != null ? (row[cols[f]] || '').trim() : null);
 
     const mode = normalizeMode(get('mode'));
@@ -565,6 +576,10 @@ function _parseDataLogTimeSeries(rows, upper, opColIdx) {
   for (let i = 1; i < rows.length; i++) {
     const row = rows[i];
     if (!row[opColIdx]) continue;
+    // 반복 헤더 skip: INDEX/OPERATION + TIME 조합
+    const firstUpper = (row[0] || '').toUpperCase().trim();
+    if ((firstUpper === 'INDEX' || firstUpper === 'OPERATION') && row.some(c => (c || '').toUpperCase().includes('TIME'))) continue;
+    if (/^(ECS |SHIP |TOTAL TIME|MAKE DATE|- \d)/i.test(firstUpper)) continue;
 
     const op          = row[opColIdx].trim().toUpperCase();
     const isBallast   = op === 'BALLAST'   || op === 'N-B' || /^\d+-?B$/i.test(op);

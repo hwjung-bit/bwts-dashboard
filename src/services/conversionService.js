@@ -11,11 +11,11 @@ import { CONFIG } from "../config.js";
  * @returns {"EVENTLOG"|"OPERATIONTIMELOG"|"DATALOG"|"TOTAL"}
  */
 export function detectLogType(pdfFileName) {
-  const name = (pdfFileName || "").toUpperCase();
-  if (name.includes("EVENTLOG") || name.includes("EVENT_LOG"))           return "EVENTLOG";
-  if (name.includes("OPERATIONTIME") || name.includes("OPERATION_TIME")) return "OPERATIONTIMELOG";
-  if (name.includes("DATALOG") || name.includes("DATA_LOG") || name.includes("DATAREPORT")) return "DATALOG";
-  if (name.includes("TOTALLOG") || name.includes("TOTAL"))              return "TOTAL";
+  const name = (pdfFileName || "").toUpperCase().replace(/[\s_-]+/g, ''); // 공백/언더스코어/하이픈 제거 후 비교
+  if (name.includes("EVENTLOG") || name.includes("EVENTREPORT"))                 return "EVENTLOG";
+  if (name.includes("OPERATIONTIME") || name.includes("OPTIONTIME"))             return "OPERATIONTIMELOG";
+  if (name.includes("DATALOG") || name.includes("DATAREPORT") || name.includes("DATALOG")) return "DATALOG";
+  if (name.includes("TOTALLOG") || name.includes("TOTAL"))                       return "TOTAL";
   return "TOTAL"; // 기본값
 }
 
