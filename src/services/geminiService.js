@@ -289,154 +289,171 @@ function checkZeroOperations(data) {
   }
 }
 
+// ── 알람 카테고리 정의 ──────────────────────────────────────
+const ALARM_CATEGORIES = {
+  TRO:    { label: "TRO 이상",      labelEn: "TRO Issue",         icon: "🔬" },
+  VALVE:  { label: "밸브 이상",     labelEn: "Valve Issue",       icon: "🔧" },
+  ECU:    { label: "ECU/전원 이상", labelEn: "ECU/Power Issue",   icon: "⚡" },
+  FLOW:   { label: "유량 이상",     labelEn: "Flow Issue",        icon: "💧" },
+  ANU:    { label: "중화제 이상",   labelEn: "Neutralizer Issue", icon: "🧪" },
+  COMM:   { label: "통신 장애",     labelEn: "Communication",     icon: "📡" },
+  ENV:    { label: "환경/센서",     labelEn: "Environment",       icon: "🌡️" },
+  SAFETY: { label: "안전 경고",     labelEn: "Safety Alert",      icon: "🚨" },
+  OTHER:  { label: "기타",         labelEn: "Other",             icon: "⚠️" },
+};
+
 // ── 알람 코드 정보 (Techcross 매뉴얼 Alarm_Fault_List v3.4 기준) ──
 const ALARM_INFO = {
   CODE100: {
+    cat: "ECU",
     title: "ECU 비상정지",                    titleEn: "ECU Emergency Stop",
     action: "ECU 내부 점검 — 전류 과부하(>PRU×1125A), 고압(>4.5bar), 고온(>45°C), VLS 에러 가능성. PRU 상태 및 전극 확인",
     actionEn: "Inspect ECU — overcurrent(>PRU×1125A), high pressure(>4.5bar), high temp(>45°C), or VLS error. Check PRU and electrode status",
   },
   CODE200: {
+    cat: "TRO",
     title: "TRO 저농도",                      titleEn: "TRO Concentration Low",
     action: "Ballast 중 TRO <5mg/L (3회 연속 시 발생). CLX 시약 유효기간 및 TSU Bypass Line 소통 상태 점검",
     actionEn: "TRO <5mg/L during ballasting (triggered after 3 consecutive readings). Check CLX reagent date and TSU bypass line",
   },
   CODE201: {
+    cat: "TRO",
     title: "TRO 고농도",                      titleEn: "TRO Concentration High",
     action: "Ballast >10mg/L 또는 Deballast >0.1mg/L(IMO)/>0.07mg/L(USCG). STS 주입 펌프 및 ANU 탱크 레벨 확인",
     actionEn: "Ballast >10mg/L or Deballast >0.1mg/L(IMO)/>0.07mg/L(USCG). Check STS pump and ANU tank level",
   },
   CODE301: {
+    cat: "ANU",
     title: "중화제 탱크 초기충전",              titleEn: "ANU Tank Initial Fill",
     action: "중화제(NaCl) 초기 충전 필요. 레벨 센서 영점 교정 및 탱크 상태 확인",
     actionEn: "Neutralizer(NaCl) initial fill required. Recalibrate level sensor and check tank condition",
   },
-  CODE302: {
+  CODE302: { cat: "ANU",
     title: "중화제 탱크 저수위",               titleEn: "ANU Tank Level Low",
     action: "중화제 보충 필요. 레벨 센서 및 공급 라인 밸브 점검",
     actionEn: "Replenish neutralizer. Check level sensor and supply line valves",
   },
-  CODE303: {
+  CODE303: { cat: "ANU",
     title: "중화제 탱크 고수위",               titleEn: "ANU Tank Level High",
     action: "오버플로우 방지 밸브 및 배출 라인 점검. 레벨 센서 고착 여부 확인",
     actionEn: "Check overflow prevention valve and drain line. Inspect level sensor for stuck condition",
   },
-  CODE400: {
+  CODE400: { cat: "ECU",
     title: "PDE 비상정지",                    titleEn: "PDE Emergency Stop",
     action: "운전자에 의한 긴급 정지. PDE 상태 확인 후 원인 조치 및 리셋",
     actionEn: "Emergency stop by operator. Check PDE status, address root cause and reset",
   },
-  CODE402: {
+  CODE402: { cat: "ECU",
     title: "440V MC 투입 실패",               titleEn: "440V MC Fail",
     action: "전자접촉기(MC) 고장. 전원 공급 상태, MC 코일/접점, MCCB 트립 여부 점검",
     actionEn: "Magnet contactor malfunction. Check power supply, MC coil/contacts, MCCB trip status",
   },
-  CODE405: {
+  CODE405: { cat: "ECU",
     title: "ECU 전류 과부하",                  titleEn: "ECU Current High",
     action: "전류 >PRU×1125A. 전극 스케일 부착 또는 해수 염분 급변 가능성. CIP 세정 및 CSU 센서 확인",
     actionEn: "Current >PRU×1125A. Possible electrode scaling or salinity change. Perform CIP and check CSU",
   },
-  CODE406: {
+  CODE406: { cat: "ECU",
     title: "입력 전압 저하",                   titleEn: "Input Voltage Low",
     action: "입력 전압 <374V(440V-15%) Alarm, <352V(440V-20%) Fault. 배전반 전압 및 발전기 AVR 점검",
     actionEn: "Input voltage <374V(-15%) Alarm, <352V(-20%) Fault. Check switchboard voltage and generator AVR",
   },
-  CODE407: {
+  CODE407: { cat: "ECU",
     title: "입력 전압 과다",                   titleEn: "Input Voltage High",
     action: "입력 전압 >506V(440V+15%) Alarm, >528V(440V+20%) Fault. 배전반 전압 및 발전기 AVR 점검",
     actionEn: "Input voltage >506V(+15%) Alarm, >528V(+20%) Fault. Check switchboard voltage and generator AVR",
   },
-  CODE503: {
+  CODE503: { cat: "FLOW",
     title: "펌프 신호 미확인",                  titleEn: "Pump Signal Not Confirmed",
     action: "해수/담수 펌프 운전 신호 미수신. 1분 지속 시 Shutdown. 펌프 기동 상태 및 신호 배선 점검",
     actionEn: "S.W/F.W pump signal not confirmed. Shutdown after 1 min. Check pump start status and signal wiring",
   },
-  CODE601: {
+  CODE601: { cat: "ENV",
     title: "해수 온도 과열",                   titleEn: "Seawater Temp High",
     action: "해수 온도 >36°C. 해수 흡입 라인 및 온도 센서 점검. 고온 해역 운항 시 정상 발생 가능",
     actionEn: "Seawater temp >36°C. Check seawater intake line and temp sensor. May be normal in warm waters",
   },
-  CODE603: {
+  CODE603: { cat: "ENV",
     title: "냉각수 온도 과열",                  titleEn: "Cooling Water Temp High",
     action: "냉각수 >43°C Alarm, >45°C Fault. 냉각수 펌프, 열교환기 오염, 냉각수 라인 밸브 점검",
     actionEn: "Cooling water >43°C Alarm, >45°C Fault. Check cooling pump, heat exchanger fouling, line valves",
   },
-  CODE604: {
+  CODE604: { cat: "FLOW",
     title: "유량 저하",                        titleEn: "FMU Flow Rate Low",
     action: "유량 <15% (3분 지속 Alarm, 5분 Fault). 해수 펌프, 스트레이너 막힘, 흡입 밸브 점검",
     actionEn: "Flow rate <15% (3min Alarm, 5min Fault). Check seawater pump, strainer blockage, suction valve",
   },
-  CODE605: {
+  CODE605: { cat: "FLOW",
     title: "유량 과다",                        titleEn: "FMU Flow Rate High",
     action: "유량 >110% (저염분 Mixing 시 >80%). 3분 지속 Alarm, 5분 Fault. 유량 조절 밸브 및 FMU 센서 점검",
     actionEn: "Flow rate >110% (Mixing >80%). 3min Alarm, 5min Fault. Check flow control valve and FMU calibration",
   },
-  CODE606: {
+  CODE606: { cat: "SAFETY",
     title: "수소가스 감지",                     titleEn: "H2 Gas Detected",
     action: ">25%LEL Alarm, >50%LEL Fault(Shutdown). 전해조 가스 누출 점검. 환기 팬 작동 확인",
     actionEn: ">25%LEL Alarm, >50%LEL Fault(Shutdown). Check electrolyzer gas leak. Verify ventilation fan operation",
   },
-  CODE607: {
+  CODE607: { cat: "ENV",
     title: "저염분 감지",                      titleEn: "CSU Conductivity Low",
     action: "염분 <1.0PSU (1분 지속 Alarm, 2분 Fault). 저염분 해역 운항 시 처리 효율 저하. CSU 센서 점검",
     actionEn: "Salinity <1.0PSU (1min Alarm, 2min Fault). Low efficiency in low-salinity waters. Check CSU sensor",
   },
-  CODE600: {
+  CODE600: { cat: "ENV",
     title: "해수 온도 저온",                   titleEn: "Seawater Temp Low",
     action: "저온 해역 운항 시 정상 발생 가능. 히터 작동 여부 확인. 지속 시 운전 모드 조정",
     actionEn: "May be normal in cold water areas. Check heater operation. Adjust operating mode if persistent",
   },
-  CODE701: {
+  CODE701: { cat: "COMM",
     title: "통신 장애",                        titleEn: "Communication Fail",
     action: "ECS 장비 간 통신 두절. 1분 지속 시 Shutdown. RTU/AIM 모듈 케이블 및 커넥터 점검",
     actionEn: "Communication failure between ECS devices. Shutdown after 1min. Check RTU/AIM cables and connectors",
   },
-  CODE703: {
+  CODE703: { cat: "COMM",
     title: "센서 통신 에러",                    titleEn: "Sensor Communication Error",
     action: "해당 센서 배선 및 커넥터 점검. 센서 모듈 교체 필요 여부 확인",
     actionEn: "Check sensor wiring and connectors. Assess module replacement need",
   },
-  CODE704: {
+  CODE704: { cat: "VALVE",
     title: "Bypass 밸브 개방",                 titleEn: "Bypass Valve Opened",
     action: "Ballast 운전 중 Bypass 밸브 개방. 미처리수 유입 가능. 밸브 리미트 스위치 및 공압 라인 점검",
     actionEn: "Bypass valve opened during ballasting. Untreated water may flow. Check limit switch and pneumatic line",
   },
-  CODE706: {
+  CODE706: { cat: "ECU",
     title: "비상운전 모드 진입",                 titleEn: "Emergency Mode",
     action: "자동 운전 불가 상태. RCM 셀렉트 스위치 변경 또는 원인 알람 확인 후 리셋",
     actionEn: "Auto operation unavailable. Check RCM select switch or root cause alarm, then reset",
   },
-  CODE721: {
+  CODE721: { cat: "VALVE",
     title: "밸브 작동 이상",                    titleEn: "Valve Operation Error",
     action: "밸브 공압 실린더, 리미트 스위치, 솔레노이드 밸브 점검",
     actionEn: "Check valve pneumatic cylinder, limit switch, solenoid valve",
   },
-  CODE727: {
+  CODE727: { cat: "SAFETY",
     title: "[긴급] 미처리수 배출",               titleEn: "[URGENT] Untreated Water Discharge",
     action: "IMO 규정 위반 가능성. 즉시 운전 중지 후 밸브 라인업 및 TRO 센서 확인",
     actionEn: "Possible IMO violation. Stop operation immediately and check valve lineup and TRO sensor",
   },
-  CODE731: {
+  CODE731: { cat: "VALVE",
     title: "밸브 비정상 종료",                   titleEn: "Valve Abnormal Stop",
     action: "밸브 작동 중 ECS 비정상 종료. 밸브 현재 위치 확인 후 수동 리셋",
     actionEn: "ECS shut down during valve operation. Verify valve position and manual reset",
   },
-  CODE734: {
+  CODE734: { cat: "SAFETY",
     title: "탄화수소 가스 감지",                 titleEn: "Hydrocarbon Gas Detected",
     action: "탄화수소 가스 감지 — 즉시 Fault(Shutdown). 가스 누출원 확인 및 환기 점검",
     actionEn: "Hydrocarbon gas detected — immediate Fault(Shutdown). Check gas leak source and ventilation",
   },
-  CODE774: {
+  CODE774: { cat: "VALVE",
     title: "냉각수 밸브 이상",                   titleEn: "Cooling Water Valve Error",
     action: "냉각수 공급 밸브(F.W Inlet) 리미트 스위치 및 공압 점검. 에어 벤트 확인",
     actionEn: "Check F.W inlet valve limit switch and pneumatic line. Vent air from cooling line",
   },
-  VRCS_ERR: {
+  VRCS_ERR: { cat: "VALVE",
     title: "[긴급] 밸브 채터링",                 titleEn: "[URGENT] Valve Chattering",
     action: "밸브 반복 개폐 감지. 공압 라인 누기, 리미트 스위치, 솔레노이드 밸브 즉각 점검",
     actionEn: "Repeated valve open/close detected. Immediately inspect pneumatic line, limit switch, solenoid valve",
   },
-  LOG_OVERFLOW: {
+  LOG_OVERFLOW: { cat: "OTHER",
     title: "Event Log 과다",                    titleEn: "Event Log Overflow",
     action: "Event Log 100건 초과. 반복 알람 원인 분석 및 전체 로그 상세 검토 필요",
     actionEn: "Event Log exceeded 100 entries. Analyze repeated alarm root cause and perform detailed log review",
@@ -534,42 +551,74 @@ function autoFillRemarks(data) {
     enLines.push(`[TRO Warning] Deballasting TRO ${dMax}ppm — significantly exceeds IMO limit (0.1ppm). Possible sensor cross-contamination or column mismatch. Verify raw Data Log.`);
   }
 
-  // ─ 알람 코드별 (상세 원인/조치) ────────────────────────────
+  // ─ 알람 카테고리별 그룹화 ──────────────────────────────────
+  // alarm_summary: VesselDetail에서 테이블로 렌더링할 구조화 데이터
+  const alarmSummary = [];
+
   if (alarms.length === 0) {
     koLines.push("[알람없음] 이상 알람 없음.");
     enLines.push("[No Alarms] No abnormal alarms detected.");
   } else {
+    // 코드별 집계
     const codeMap = new Map();
     for (const a of alarms) {
       const code = a.code || "(코드없음)";
-      if (!codeMap.has(code)) codeMap.set(code, { trips: 0, total: 0 });
+      if (!codeMap.has(code)) codeMap.set(code, { trips: 0, alarms: 0, total: 0 });
       const g = codeMap.get(code);
       const cnt = a.count || 1;
       if ((a.level || "").toLowerCase() === "trip") g.trips += cnt;
+      else g.alarms += cnt;
       g.total += cnt;
     }
+
+    // 카테고리별 그룹화
+    const catGroups = new Map();
     for (const [code, g] of codeMap) {
-      const nonTrips = g.total - g.trips;
-      const cntParts = [g.trips && `Trip ${g.trips}건`, nonTrips && `Alarm ${nonTrips}건`].filter(Boolean).join(", ");
-      const cntPartsEn = [g.trips && `Trip×${g.trips}`, nonTrips && `Alarm×${nonTrips}`].filter(Boolean).join("+");
       const info = ALARM_INFO[code];
-      if (info) {
-        koLines.push(`${info.title} (${cntParts}) — ${info.action} [${code}]`);
-        enLines.push(`${info.titleEn} (${cntPartsEn}) — ${info.actionEn} [${code}]`);
-      } else {
-        koLines.push(`${code} (${cntParts}) — 점검 필요. 상세 원인 확인 후 제조사 기술지원 요청`);
-        enLines.push(`${code} (${cntPartsEn}) — Inspection required. Identify root cause and contact manufacturer`);
-      }
+      const cat = info?.cat || "OTHER";
+      if (!catGroups.has(cat)) catGroups.set(cat, { trips: 0, alarms: 0, codes: [], actions: [], actionsEn: [] });
+      const cg = catGroups.get(cat);
+      cg.trips += g.trips;
+      cg.alarms += g.alarms;
+      const codeLabel = info ? `${info.title}(${code})` : code;
+      const cnt = g.total > 1 ? ` ×${g.total}` : '';
+      cg.codes.push(`${codeLabel}${cnt}`);
+      cg.actions.push(info?.action || "상세 원인 확인 후 제조사 기술지원 요청");
+      cg.actionsEn.push(info?.actionEn || "Identify root cause and contact manufacturer");
     }
 
-    // 반복 알람 경고 (5회 이상)
+    // alarm_summary 구조화 + ai_remarks 간결화
+    for (const [cat, cg] of catGroups) {
+      const catInfo = ALARM_CATEGORIES[cat] || ALARM_CATEGORIES.OTHER;
+      const cntStr = [cg.trips && `Trip ${cg.trips}건`, cg.alarms && `Alarm ${cg.alarms}건`].filter(Boolean).join(" / ");
+      const cntStrEn = [cg.trips && `Trip×${cg.trips}`, cg.alarms && `Alarm×${cg.alarms}`].filter(Boolean).join("+");
+      // 조치는 중복 제거 후 첫 2개만
+      const uniqueActions = [...new Set(cg.actions)].slice(0, 2);
+      const uniqueActionsEn = [...new Set(cg.actionsEn)].slice(0, 2);
+
+      alarmSummary.push({
+        cat, icon: catInfo.icon, label: catInfo.label, labelEn: catInfo.labelEn,
+        trips: cg.trips, alarms: cg.alarms,
+        codes: cg.codes,
+        action: uniqueActions.join(' / '),
+        actionEn: uniqueActionsEn.join(' / '),
+      });
+
+      // ai_remarks에는 카테고리별 1줄씩만
+      koLines.push(`${catInfo.icon} ${catInfo.label} (${cntStr}) — ${uniqueActions[0]}`);
+      enLines.push(`${catInfo.icon} ${catInfo.labelEn} (${cntStrEn}) — ${uniqueActionsEn[0]}`);
+    }
+
+    // 반복 알람 경고
     const repeated = evAnalysis.repeated_alarms || [];
     if (repeated.length > 0) {
       const repCodes = repeated.map(r => `${r.code}(${r.total}회)`).join(', ');
-      koLines.push(`[반복 알람] ${repCodes} — 동일 알람 반복 발생. 근본 원인 분석(RCA) 필요.`);
-      enLines.push(`[Repeated Alarms] ${repeated.map(r => `${r.code}(${r.total}x)`).join(', ')} — Root cause analysis required.`);
+      koLines.push(`⚠️ 반복 알람: ${repCodes} — 근본 원인 분석(RCA) 필요`);
+      enLines.push(`⚠️ Repeated: ${repeated.map(r => `${r.code}(${r.total}x)`).join(', ')} — RCA required`);
     }
   }
+
+  data.alarm_summary = alarmSummary;
 
   // ─ [운전 이상] (OpTime 이상 탐지 결과) ─────────────────────
   if (opAnomalies.length > 0) {

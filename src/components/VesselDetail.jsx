@@ -350,51 +350,72 @@ export default function VesselDetail({ vessel, onClose, isAdmin }) {
             </dl>
           </div>
 
-          {/* AI 분석 결과 — 선박 정보 아래 */}
+          {/* AI 분석 결과 — 테이블 + 간결 요약 */}
           {r?.ai_remarks && (
             <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
-              <div className="text-xs text-blue-600 font-medium mb-2">🤖 AI 분석 결과</div>
-              <div className="text-sm text-slate-700 leading-relaxed space-y-1.5">
-                {(Array.isArray(r.ai_remarks)
-                  ? r.ai_remarks
-                  : (r.ai_remarks || "").replace(/\\n/g, "\n").split("\n")
-                ).filter(Boolean).map((line, i) => {
-                  const isOps     = line.startsWith("[운전") || line.startsWith("[Operations]");
-                  const isEcu     = line.startsWith("[ECU]");
-                  const isAlarm   = /^\[CODE|^\[VRCS|^\[LOG_OVERFLOW|^\[알람없음/.test(line);
-                  const isSummary = line.startsWith("[종합") || line.startsWith("[Summary]");
-                  if (isOps) return (
-                    <p key={i} className="text-slate-700">
-                      <span className="mr-1">📋</span>{line}
-                    </p>
-                  );
-                  if (isEcu) return (
-                    <p key={i} className="text-blue-700 pl-4 border-l-2 border-blue-300">
-                      <span className="mr-1">🔌</span>{line}
-                    </p>
-                  );
-                  if (isAlarm) return (
-                    <p key={i} className="text-amber-700 pl-4 border-l-2 border-amber-300">
-                      <span className="mr-1">⚠️</span>{line}
-                    </p>
-                  );
-                  if (isSummary) {
-                    const prefix    = line.match(/^\[[^\]]+\]\s*/)?.[0] || "";
-                    const body      = line.slice(prefix.length);
-                    const sentences = body.split(/(?<=\.)\s+/).filter(Boolean);
-                    return (
-                      <div key={i} className="pt-0.5">
-                        <p className="text-slate-800 font-medium">
-                          <span className="mr-1">💡</span>
-                          <span className="font-semibold">{prefix.trim()}</span>
-                        </p>
-                        {sentences.map((s, j) => (
-                          <p key={j} className="text-slate-700 pl-5 mt-0.5">{s}</p>
-                        ))}
-                      </div>
-                    );
-                  }
-                  return <p key={i} className="text-slate-600 pl-2">{line}</p>;
+              <div className="text-xs text-blue-600 font-medium mb-3">🤖 AI 분석 결과</div>
+
+              {/* 운전 현황 + ECU (상단 텍스트) */}
+              <div className="text-sm text-slate-700 leading-relaxed space-y-1 mb-3">
+                {(Array.isArray(r.ai_remarks) ? r.ai_remarks : []).filter(Boolean).map((line, i) => {
+                  if (line.startsWith("[운전") || line.startsWith("[Operations]"))
+                    return <p key={i}><span className="mr-1">📋</span>{line}</p>;
+                  if (line.startsWith("[ECU]"))
+                    return <p key={i} className="text-blue-700 pl-4 border-l-2 border-blue-300"><span className="mr-1">🔌</span>{line}</p>;
+                  if (line.startsWith("[TRO"))
+                    return <p key={i} className="text-red-600 pl-4 border-l-2 border-red-300"><span className="mr-1">🔬</span>{line}</p>;
+                  if (line.startsWith("[종합") || line.startsWith("[Summary]"))
+                    return <p key={i} className="text-slate-800 font-medium mt-2"><span className="mr-1">💡</span>{line}</p>;
+                  return null; // 카테고리별 알람은 테이블로 표시하므로 여기서 제외
+                })}
+              </div>
+
+              {/* 알람 요약 테이블 */}
+              {r.alarm_summary && r.alarm_summary.length > 0 && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-blue-100/60 text-blue-700">
+                        <th className="text-left px-2 py-1.5 rounded-tl-lg">구분</th>
+                        <th className="text-center px-2 py-1.5 w-16">Trip</th>
+                        <th className="text-center px-2 py-1.5 w-16">Alarm</th>
+                        <th className="text-left px-2 py-1.5">관련 코드</th>
+                        <th className="text-left px-2 py-1.5 rounded-tr-lg">조치 사항</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-blue-100/40">
+                      {r.alarm_summary.map((row, i) => (
+                        <tr key={i} className={row.trips > 0 ? "bg-red-50/50" : ""}>
+                          <td className="px-2 py-1.5 font-medium whitespace-nowrap">
+                            <span className="mr-1">{row.icon}</span>{row.label}
+                          </td>
+                          <td className="text-center px-2 py-1.5">
+                            {row.trips > 0 ? <span className="text-red-600 font-bold">{row.trips}</span> : <span className="text-slate-300">-</span>}
+                          </td>
+                          <td className="text-center px-2 py-1.5">
+                            {row.alarms > 0 ? <span className="text-amber-600 font-semibold">{row.alarms}</span> : <span className="text-slate-300">-</span>}
+                          </td>
+                          <td className="px-2 py-1.5 text-slate-500">
+                            {row.codes.map((c, j) => <span key={j} className="inline-block mr-1 mb-0.5 bg-white px-1 rounded border border-slate-200 text-[10px]">{c}</span>)}
+                          </td>
+                          <td className="px-2 py-1.5 text-slate-600 leading-snug max-w-[300px]">{row.action}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* 운전 이상 + 해역 + 종합 (하단) */}
+              <div className="text-sm text-slate-700 leading-relaxed space-y-1 mt-3">
+                {(Array.isArray(r.ai_remarks) ? r.ai_remarks : []).filter(Boolean).map((line, i) => {
+                  if (line.startsWith("[운전 이상]") || line.startsWith("[Operation Anomalies]"))
+                    return <p key={i} className="text-amber-600"><span className="mr-1">📋</span>{line}</p>;
+                  if (line.startsWith("[운항 해역]") || line.startsWith("[Operating Area]"))
+                    return <p key={i} className="text-slate-500"><span className="mr-1">🌍</span>{line}</p>;
+                  if (line.startsWith("⚠️"))
+                    return <p key={i} className="text-amber-700 font-medium">{line}</p>;
+                  return null;
                 })}
               </div>
             </div>
