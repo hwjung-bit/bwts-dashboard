@@ -376,10 +376,10 @@ export default function VesselDetail({ vessel, onClose, isAdmin }) {
                   <table className="w-full text-xs border-collapse table-fixed">
                     <thead>
                       <tr className="bg-blue-100/60 text-blue-700">
-                        <th className="text-left px-2 py-1.5 rounded-tl-lg w-[72px]">구분</th>
-                        <th className="text-center px-1 py-1.5 w-[32px]">T</th>
-                        <th className="text-center px-1 py-1.5 w-[32px]">A</th>
-                        <th className="text-left px-2 py-1.5 w-[30%]">관련 코드</th>
+                        <th className="text-left px-2 py-1.5 rounded-tl-lg w-[80px]">구분</th>
+                        <th className="text-center px-1 py-1.5 w-[28px]">T</th>
+                        <th className="text-center px-1 py-1.5 w-[28px]">A</th>
+                        <th className="text-left px-2 py-1.5 w-[25%]">관련 코드</th>
                         <th className="text-left px-2 py-1.5 rounded-tr-lg">조치 사항</th>
                       </tr>
                     </thead>
