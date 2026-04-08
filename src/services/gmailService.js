@@ -77,30 +77,35 @@ export function buildMailBody(vessel, analysisResult, finalRemark, lang = "ko") 
     return [hdr, "  " + "─".repeat(62), ...rows].join("\n");
   }
 
-  // ── 조치 요청 추출 (코드별 —이후 핵심 액션만) ─────────────
+  // ── 조치 요청 (alarm_summary 기반) ─────────────────────────
+  const alarmSummary = analysisResult.alarm_summary || [];
+
   function buildActionItems() {
     const useArr = lang === "en" && remarksEnArr.length > 0 ? remarksEnArr : remarksArr;
     const actions = [];
 
     // 배출 TRO IMO 초과 여부를 운전 현황에서 별도 추출
     const opsLine = getOpsLine(useArr) || "";
-    const troMatch = opsLine.match(/배출 TRO ([\d.]+)ppm.*IMO.*초과/);
+    const troMatch = lang === "en"
+      ? opsLine.match(/Deballasting TRO max ([\d.]+)ppm.*exceeded/)
+      : opsLine.match(/배출 TRO 최댓값 ([\d.]+)ppm.*초과/);
     if (troMatch) {
-      actions.push(`  1. 배출 TRO ${troMatch[1]}ppm — IMO 기준(0.1ppm) 초과 확인 및 중화 시스템 점검 필요`);
+      actions.push(lang === "en"
+        ? `  1. Deballasting TRO ${troMatch[1]}ppm — exceeds IMO limit (0.1ppm), check neutralization system`
+        : `  1. 배출 TRO ${troMatch[1]}ppm — IMO 기준(0.1ppm) 초과 확인 및 중화 시스템 점검 필요`);
     }
 
-    // 코드별 액션 (— 이후 텍스트)
-    const codeActions = useArr
-      .filter(l => /^\[(CODE|VRCS_ERR)/i.test(l) && l.includes("—"))
-      .map(l => {
-        const codeMatch = l.match(/^\[([^\]]+)\]/);
-        const code = codeMatch ? codeMatch[1] : "";
-        const action = l.split("—").slice(1).join("—").trim()
-          .replace(/\s*권장\.?\s*$/, "").replace(/\s*권고\.?\s*$/, "");
-        return `  · [${code}] ${action}`;
-      });
-
-    actions.push(...codeActions);
+    // alarm_summary 기반 카테고리별 조치사항
+    if (alarmSummary.length > 0) {
+      for (const row of alarmSummary) {
+        const label = lang === "en" ? row.labelEn : row.label;
+        const action = lang === "en" ? row.actionEn : row.action;
+        if (action) {
+          const n = actions.length + 1;
+          actions.push(`  ${n}. [${label}] ${action}`);
+        }
+      }
+    }
 
     return actions.length > 0 ? actions.join("\n") : (lang === "en" ? "  · No action required." : "  · 특이 조치사항 없음.");
   }

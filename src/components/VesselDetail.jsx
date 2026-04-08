@@ -165,7 +165,7 @@ export default function VesselDetail({ vessel, onClose, isAdmin }) {
       {isAdmin && showDebug && r && r._debug && (() => {
         const dbg = r._debug || {};
         const s0Tro = dbg.stage0RawTro;
-        const aiTro = dbg.aiTroData;
+        const stage1Tro = dbg.aiTroData;
         return (
           <div className="mx-5 mt-4 bg-slate-900 text-slate-200 rounded-xl p-4 text-xs font-mono overflow-auto max-h-[60vh]">
             <div className="text-slate-500 mb-3 text-[11px] select-none">── 파싱 진단 (관리자 전용) ──────────────────────</div>
@@ -205,14 +205,14 @@ export default function VesselDetail({ vessel, onClose, isAdmin }) {
               <DbgRow label="FMU avg (stage0)"      value={s0Tro?.fmu_flow_avg     ?? "null"} />
             </DbgSection>
 
-            {/* 3. AI Stage 1 결과 */}
-            <DbgSection title={dbg.totalLogFailed ? "🤖 AI Stage 1 결과 (미실행 — Stage 0만 사용)" : "🤖 AI Stage 1 결과 (텍스트 추출 후 분석)"}>
-              {dbg.totalLogFailed && <DbgErr msg="pdf.js 실패 → AI 분석 없음, Stage 0 데이터만 최종 반영" />}
-              <DbgRow label="AI tro_data"           value={JSON.stringify(aiTro)} />
-              <DbgRow label="B-TRO (AI)"            value={aiTro?.ballasting_avg   ?? "null"} highlight={aiTro?.ballasting_avg != null} />
-              <DbgRow label="D-TRO (AI)"            value={aiTro?.deballasting_max ?? "null"} />
-              <DbgRow label="ECU avg (AI)"          value={aiTro?.ecu_current_avg  ?? "null"} />
-              <DbgRow label="FMU avg (AI)"          value={aiTro?.fmu_flow_avg     ?? "null"} />
+            {/* 3. Stage 1 결과 (텍스트 추출) */}
+            <DbgSection title={dbg.totalLogFailed ? "📋 Stage 1 결과 (미실행 — Stage 0만 사용)" : "📋 Stage 1 결과 (텍스트 추출)"}>
+              {dbg.totalLogFailed && <DbgErr msg="pdf.js 실패 → 텍스트 추출 없음, Stage 0 데이터만 최종 반영" />}
+              <DbgRow label="Stage1 tro_data"       value={JSON.stringify(stage1Tro)} />
+              <DbgRow label="B-TRO (Stage1)"        value={stage1Tro?.ballasting_avg   ?? "null"} highlight={stage1Tro?.ballasting_avg != null} />
+              <DbgRow label="D-TRO (Stage1)"        value={stage1Tro?.deballasting_max ?? "null"} />
+              <DbgRow label="ECU avg (Stage1)"      value={stage1Tro?.ecu_current_avg  ?? "null"} />
+              <DbgRow label="FMU avg (Stage1)"      value={stage1Tro?.fmu_flow_avg     ?? "null"} />
             </DbgSection>
 
             {/* 4. 최종 병합 결과 */}
@@ -350,10 +350,10 @@ export default function VesselDetail({ vessel, onClose, isAdmin }) {
             </dl>
           </div>
 
-          {/* AI 분석 결과 — 테이블 + 간결 요약 */}
+          {/* 분석 결과 — 테이블 + 간결 요약 */}
           {r?.ai_remarks && (
             <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
-              <div className="text-xs text-blue-600 font-medium mb-3">🤖 AI 분석 결과</div>
+              <div className="text-xs text-blue-600 font-medium mb-3">📊 분석 결과</div>
 
               {/* 운전 현황 + ECU (상단 텍스트) */}
               <div className="text-sm text-slate-700 leading-relaxed space-y-1 mb-3">
