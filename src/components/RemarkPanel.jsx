@@ -1,6 +1,5 @@
 // RemarkPanel (ReviewPanel) - 검토 & 본선 지침 전달
 import { useState } from 'react';
-import { generateFinalRemark } from '../services/geminiService.js';
 import { sendMail, buildMailBody, buildMailSubject } from '../services/gmailService.js';
 
 
@@ -10,7 +9,6 @@ export default function RemarkPanel({ vessel, analysisResult, accessToken, onUpd
     panelTitle:    "Review & Vessel Instructions",
     reviewLabel:   "Review Notes",
     saveNote:      "Save Note",
-    genAi:         "Generate AI Remark",
     markReviewed:  "✓ Reviewed",
     confirmNormal: "✅ Confirmed Normal",
     mailBtn:       "✉️ Send Instructions",
@@ -23,7 +21,6 @@ export default function RemarkPanel({ vessel, analysisResult, accessToken, onUpd
     panelTitle:    "검토 & 본선 지침 전달",
     reviewLabel:   "담당자 검토 내용",
     saveNote:      "메모 저장",
-    genAi:         "🤖 AI 리마크 생성",
     markReviewed:  "✓ 검토 완료",
     confirmNormal: "✅ 정상 확인",
     mailBtn:       "✉️ 본선 지침 전달",
@@ -34,9 +31,6 @@ export default function RemarkPanel({ vessel, analysisResult, accessToken, onUpd
     reviewedBadge: "✓ 검토완료",
   };
   const [note, setNote]     = useState(vessel?.reviewNote || "");
-  const [remark, setRemark] = useState(vessel?.reviewRemark || "");
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiError, setAiError]     = useState("");
 
   // Email state
   const [showEmail, setShowEmail]   = useState(false);
@@ -48,40 +42,21 @@ export default function RemarkPanel({ vessel, analysisResult, accessToken, onUpd
   const isReviewed = vessel?.reviewed === true || vessel?.analysisStatus === "REVIEWED";
   const canSendMail = !!vessel?.analysisResult || isReviewed;
 
-  async function handleGenerateAi() {
-    if (!analysisResult) { setAiError("먼저 PDF 분석을 완료해주세요."); return; }
-    setAiLoading(true);
-    setAiError("");
-    try {
-      const finalRemark = await generateFinalRemark(analysisResult, note, lang);
-      setRemark(finalRemark);
-      onUpdate?.({ reviewNote: note, reviewRemark: finalRemark });
-    } catch (e) {
-      setAiError(`리마크 생성 실패: ${e.message}`);
-    } finally {
-      setAiLoading(false);
-    }
-  }
-
   function handleSaveNote() {
-    onUpdate?.({ reviewNote: note, reviewRemark: remark });
+    onUpdate?.({ reviewNote: note });
   }
 
   function handleMarkReviewed() {
-    // AI 판정 유지 + 검토완료 플래그만 추가
     onUpdate?.({
       reviewNote: note,
-      reviewRemark: remark,
       reviewed: true,
       reviewedAt: new Date().toISOString(),
     });
   }
 
   function handleNormalOverride() {
-    // 정상확인: AI 판정과 무관하게 이상없음으로 오버라이드
     onUpdate?.({
       reviewNote: note,
-      reviewRemark: remark,
       reviewed: true,
       analysisStatus: "NORMAL",
       reviewedAt: new Date().toISOString(),
@@ -93,7 +68,6 @@ export default function RemarkPanel({ vessel, analysisResult, accessToken, onUpd
     setSendError("");
     try {
       const subject = buildMailSubject(vessel, analysisResult?.period || period || "-", analysisResult?.overall_status, lang);
-      // 메일에는 담당자 직접 입력 note만 사용 (AI 생성 remark는 앱 내부 전용)
       const body = buildMailBody(vessel, analysisResult || {}, note || "", lang);
       await sendMail({ to: emailTo, subject, body, accessToken });
       setSent(true);
@@ -143,15 +117,6 @@ export default function RemarkPanel({ vessel, analysisResult, accessToken, onUpd
         >
           {t.saveNote}
         </button>
-        <button
-          onClick={handleGenerateAi}
-          disabled={aiLoading || !analysisResult}
-          className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 text-white rounded-lg transition-colors flex items-center gap-2"
-        >
-          {aiLoading ? (
-            <><span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" />AI 생성중...</>
-          ) : t.genAi}
-        </button>
         {!isReviewed && analysisResult && (
           <>
             <button
@@ -171,20 +136,6 @@ export default function RemarkPanel({ vessel, analysisResult, accessToken, onUpd
           </>
         )}
       </div>
-
-      {aiError && (
-        <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3">
-          {aiError}
-        </div>
-      )}
-
-      {/* AI 리마크 */}
-      {remark && (
-        <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 mb-4">
-          <div className="text-xs text-blue-600 font-medium mb-2">AI + 담당자 최종 리마크</div>
-          <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{remark}</p>
-        </div>
-      )}
 
       {/* 메일 발송 섹션 */}
       {canSendMail && (

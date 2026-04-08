@@ -87,7 +87,7 @@ function rowToMap(row, matchCol) {
   return result;
 }
 
-// ── 외부 export (geminiService 자동 섹션 탐지용) ────────────
+// ── 외부 export (섹션 탐지용) ────────────────────────────────
 export { extractPageRows as extractPageRowsExport };
 
 // ── ECS Data Log 파서 ──────────────────────────────────────

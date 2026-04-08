@@ -1,7 +1,7 @@
 // Dashboard - 메인 대시보드 (월별 분석 + 연간 현황 탭)
 import { useState, useEffect } from "react";
 import { collectMonthData } from "../services/driveService.js";
-import { analyzePdfFromDrive } from "../services/geminiService.js";
+import { analyzeCsvFromDrive, validateAndNormalizeResult } from "../services/analysisService.js";
 import { readMonthlyData, upsertMonthlyEntry, clearMonthlyData } from "../services/sheetsService.js";
 import { mapOverallStatus, CONFIG } from "../config.js";
 import StatusCards from "./StatusCards.jsx";
@@ -160,7 +160,7 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
       }
       const vesselWithPeriod = { ...vessel, year, month };
       const logPdfs = csvFiles.length > 0 ? [] : filterLogPdfs(entry.pdfs);
-      const result = await analyzePdfFromDrive([...csvFiles, ...logPdfs], accessToken, vesselWithPeriod);
+      const result = await analyzeCsvFromDrive([...csvFiles, ...logPdfs], accessToken, vesselWithPeriod);
       const mapped = mapOverallStatus(result?.overall_status, result?.error_alarms);
       const finalStatus = mapped === "NO_DATA" ? "RECEIVED" : mapped;
       updateMonthlyVessel(vesselId, {
@@ -170,7 +170,7 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
         lastAnalyzed: new Date().toISOString(),
       });
     } catch (err) {
-      // Gemini 실패 → RECEIVED 유지 (파일은 있음) + 에러 표시
+      // 분석 실패 → RECEIVED 유지 (파일은 있음) + 에러 표시
       updateMonthlyVessel(vesselId, { analysisStatus: "RECEIVED", analysisError: err.message });
       setAnalyzeError(`재분석 실패 (${vessel.vesselCode || vessel.name}): ${err.message}`);
     } finally {
@@ -278,7 +278,7 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
           const csvFiles = entry?.csvFiles ?? [];
           const vesselWithPeriod = { ...vessel, year, month };
           const logPdfs = csvFiles.length > 0 ? [] : filterLogPdfs(entry.pdfs);
-          const result = await analyzePdfFromDrive([...csvFiles, ...logPdfs], accessToken, vesselWithPeriod);
+          const result = await analyzeCsvFromDrive([...csvFiles, ...logPdfs], accessToken, vesselWithPeriod);
           const mapped = mapOverallStatus(result?.overall_status, result?.error_alarms);
           const finalStatus = mapped === "NO_DATA" ? "RECEIVED" : mapped;
           updateMonthlyVessel(vessel.id, {
@@ -319,7 +319,7 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
     try {
       const text = eventLogInputs[vesselId] ?? '';
       const { parseEventLogCsv } = await import('../services/csvService.js');
-      const { validateAndNormalizeResult } = await import('../services/geminiService.js');
+      // validateAndNormalizeResult is statically imported at the top
       const newAlarms = parseEventLogCsv(text);
       const existing  = monthlyData[vesselId]?.analysisResult ?? {};
       const merged = {

@@ -178,7 +178,7 @@ export async function collectYearData(rootFolderId, year, accessToken) {
 }
 
 /**
- * Drive 파일의 직접 링크 (Gemini File URI용)
+ * Drive 파일의 직접 링크
  */
 export function getDriveFileUri(fileId) {
   return `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;

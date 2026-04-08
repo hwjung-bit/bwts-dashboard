@@ -146,7 +146,6 @@ export default function App() {
 
   const isConfigured =
     CONFIG.GOOGLE_CLIENT_ID !== "YOUR_GOOGLE_CLIENT_ID_HERE" &&
-    CONFIG.GEMINI_API_KEY !== "YOUR_GEMINI_API_KEY_HERE" &&
     CONFIG.DRIVE_ROOT_FOLDER_ID !== "YOUR_DRIVE_ROOT_FOLDER_ID_HERE";
 
   const initials = userEmail ? userEmail[0].toUpperCase() : "?";
@@ -284,7 +283,7 @@ export default function App() {
             <div className="mb-5 bg-amber-50 border border-amber-200 rounded-xl px-5 py-4">
               <div className="text-amber-700 font-medium text-sm mb-1">⚙️ API 키 설정 필요</div>
               <p className="text-amber-600 text-xs leading-relaxed">
-                <code className="bg-amber-100 px-1 rounded text-amber-800">src/config.js</code>에서 GOOGLE_CLIENT_ID, GEMINI_API_KEY, DRIVE_ROOT_FOLDER_ID, ADMIN_EMAIL을 입력하세요.
+                <code className="bg-amber-100 px-1 rounded text-amber-800">src/config.js</code>에서 GOOGLE_CLIENT_ID, DRIVE_ROOT_FOLDER_ID, ADMIN_EMAIL을 입력하세요.
               </p>
             </div>
           )}
