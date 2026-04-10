@@ -924,6 +924,7 @@ export function parseEventLogCsv(csvText) {
   let totalCount = 0;
   let powerOnCount = 0;
   let properTerminationCount = 0;
+  const valveCounts = {};  // VRCS chattering detection
 
   for (let i = headerIdx + 1; i < rows.length; i++) {
     const row = rows[i];
@@ -941,6 +942,12 @@ export function parseEventLogCsv(csvText) {
       if (desc.includes('GPS Time Set'))                gpsTimeSetCount++;
       if (desc.includes('HMI Power On'))                powerOnCount++;
       if (desc.includes('terminated') && !desc.includes('wrong way')) properTerminationCount++;
+      // VRCS chattering: "Valve Opened.[BA008F]" / "Valve Closed.[BA008F]"
+      const valveMatch = desc.match(/Valve\s+(?:Opened|Closed)\.\[([^\],]+)/i);
+      if (valveMatch) {
+        const valve = valveMatch[1].trim();
+        valveCounts[valve] = (valveCounts[valve] || 0) + 1;
+      }
       continue;
     }
 
@@ -985,6 +992,12 @@ export function parseEventLogCsv(csvText) {
   const patterns = analyzeEventPatterns(alarms, { powerOnCount, wrongTerminationCount, properTerminationCount });
   const trip_events = alarms.filter(a => a.level === 'Trip');
 
+  // VRCS chattering: valves with >= 10 open/close cycles
+  const vrcs_data = Object.entries(valveCounts)
+    .filter(([, cnt]) => cnt >= 10)
+    .sort((a, b) => b[1] - a[1])
+    .map(([valve, count]) => ({ valve, count }));
+
   return {
     alarms,
     wrongTerminationCount,
@@ -996,6 +1009,7 @@ export function parseEventLogCsv(csvText) {
     device_ranking,
     patterns,
     trip_events,
+    vrcs_data,
   };
 }
 
@@ -1016,7 +1030,21 @@ export function combineCsvResults(opText, dataText, evText, vessel = {}) {
 
   // parseEventLogCsv 반환값 (확장됨)
   const evResult   = evText   ? parseEventLogCsv(evText)  : null;
-  const error_alarms = evResult ? evResult.alarms : [];
+  const error_alarms = evResult ? [...evResult.alarms] : [];
+
+  // VRCS chattering → VRCS_ERR alarm injection
+  if (evResult?.vrcs_data?.length > 0) {
+    for (const { valve, count } of evResult.vrcs_data) {
+      error_alarms.push({
+        code:        'VRCS_ERR',
+        description: `Valve Opened/Closed 반복 오작동 감지 [${valve}] ×${count}회`,
+        level:       count >= 100 ? 'Alarm' : 'Warning',
+        date:        null,
+        time:        null,
+        count,
+      });
+    }
+  }
 
   // 이벤트 로그 기본 통계 (기존 호환)
   const event_log_stats = evResult ? {
