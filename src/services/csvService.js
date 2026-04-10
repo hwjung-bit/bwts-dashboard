@@ -886,10 +886,13 @@ export function parseEventLogCsv(csvText) {
   const rows = parseCsvRows(csvText);
 
   // 페이지 과도 CSV (KCN 등 대용량)
+  // e.g. "페이지 과도(1200페이지) : 직접 점검 필요"
   if (rows.length <= 2) {
     const firstCell = (rows[0]?.[0] || '').trim();
     if (firstCell.includes('페이지 과도')) {
-      return { alarms: [], wrongTerminationCount: 0, gpsTimeSetCount: 0, _overflow: true };
+      const pageMatch = firstCell.match(/(\d+)\s*페이지/);
+      const pageCount = pageMatch ? parseInt(pageMatch[1]) : null;
+      return { alarms: [], wrongTerminationCount: 0, gpsTimeSetCount: 0, _overflow: true, _overflowPages: pageCount };
     }
   }
   if (rows.length < 2) return { alarms: [], wrongTerminationCount: 0, gpsTimeSetCount: 0 };
@@ -1060,9 +1063,10 @@ export function combineCsvResults(opText, dataText, evText, vessel = {}) {
 
   // Event Log overflow → LOG_OVERFLOW alarm + WARNING status
   if (evResult?._overflow) {
+    const pages = evResult._overflowPages;
     error_alarms.push({
       code:        'LOG_OVERFLOW',
-      description: 'Event Log 페이지 과도 — 밸브 오작동 또는 반복 알람 지속 가능성. 전체 로그 상세 검토 필요.',
+      description: `Event Log ${pages ? pages + '페이지 ' : ''}페이지 과도 — 밸브 오작동 또는 반복 알람 지속 가능성. 전체 로그 상세 검토 필요.`,
       level:       'Warning',
       date:        null,
       time:        null,
