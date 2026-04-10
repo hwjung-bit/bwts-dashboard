@@ -885,14 +885,18 @@ function _parseDataLogFormatB(rows, upper, opColIdx) {
 export function parseEventLogCsv(csvText) {
   const rows = parseCsvRows(csvText);
 
-  // 페이지 과도 CSV (KCN 등 대용량)
+  // 에러/과도 CSV 감지 (1~2줄짜리 에러 메시지)
   // e.g. "페이지 과도(1200페이지) : 직접 점검 필요"
+  // e.g. "변환 실패(서버 오류 503) : 직접 점검 필요"
   if (rows.length <= 2) {
     const firstCell = (rows[0]?.[0] || '').trim();
     if (firstCell.includes('페이지 과도')) {
       const pageMatch = firstCell.match(/(\d+)\s*페이지/);
       const pageCount = pageMatch ? parseInt(pageMatch[1]) : null;
       return { alarms: [], wrongTerminationCount: 0, gpsTimeSetCount: 0, _overflow: true, _overflowPages: pageCount };
+    }
+    if (firstCell.includes('변환 실패') || firstCell.includes('점검 필요') || firstCell.includes('서버 오류')) {
+      return { alarms: [], wrongTerminationCount: 0, gpsTimeSetCount: 0, _overflow: true, _overflowReason: firstCell };
     }
   }
   if (rows.length < 2) return { alarms: [], wrongTerminationCount: 0, gpsTimeSetCount: 0 };
@@ -1061,12 +1065,16 @@ export function combineCsvResults(opText, dataText, evText, vessel = {}) {
   const evResult   = evText   ? parseEventLogCsv(evText)  : null;
   const error_alarms = evResult ? [...evResult.alarms] : [];
 
-  // Event Log overflow → LOG_OVERFLOW alarm + WARNING status
+  // Event Log overflow / conversion failure → LOG_OVERFLOW alarm
   if (evResult?._overflow) {
+    const reason = evResult._overflowReason;
     const pages = evResult._overflowPages;
+    const desc = reason
+      ? `Event Log ${reason}`
+      : `Event Log ${pages ? pages + '페이지 ' : ''}페이지 과도 — 밸브 오작동 또는 반복 알람 지속 가능성. 전체 로그 상세 검토 필요.`;
     error_alarms.push({
       code:        'LOG_OVERFLOW',
-      description: `Event Log ${pages ? pages + '페이지 ' : ''}페이지 과도 — 밸브 오작동 또는 반복 알람 지속 가능성. 전체 로그 상세 검토 필요.`,
+      description: desc,
       level:       'Warning',
       date:        null,
       time:        null,
