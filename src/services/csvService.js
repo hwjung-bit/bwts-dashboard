@@ -1058,6 +1058,17 @@ export function combineCsvResults(opText, dataText, evText, vessel = {}) {
   const evResult   = evText   ? parseEventLogCsv(evText)  : null;
   const error_alarms = evResult ? [...evResult.alarms] : [];
 
+  // Event Log overflow → LOG_OVERFLOW alarm + WARNING status
+  if (evResult?._overflow) {
+    error_alarms.push({
+      code:        'LOG_OVERFLOW',
+      description: 'Event Log 페이지 과도 — 밸브 오작동 또는 반복 알람 지속 가능성. 전체 로그 상세 검토 필요.',
+      level:       'Warning',
+      date:        null,
+      time:        null,
+    });
+  }
+
   // VRCS chattering → VRCS_ERR alarm injection
   if (evResult?.vrcs_data?.length > 0) {
     for (const { valve, count } of evResult.vrcs_data) {
