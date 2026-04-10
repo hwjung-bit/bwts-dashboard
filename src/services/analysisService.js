@@ -579,6 +579,7 @@ export async function analyzeCsvFromDrive(files, accessToken, vessel = {}) {
   const opFile   = csvFiles.find(f => detectEcsFileType(f.name) === 'optime');
   const dataFile = csvFiles.find(f => detectEcsFileType(f.name) === 'data');
   const evFile   = csvFiles.find(f => detectEcsFileType(f.name) === 'event');
+  const totalFile = csvFiles.find(f => detectEcsFileType(f.name) === 'total');
 
   const readCsv = async (file) => {
     if (!file) return null;
@@ -591,11 +592,27 @@ export async function analyzeCsvFromDrive(files, accessToken, vessel = {}) {
     }
   };
 
-  const [opText, dataText, evText] = await Promise.all([
-    readCsv(opFile), readCsv(dataFile), readCsv(evFile)
-  ]);
+  const { combineCsvResults, splitTotalLogCsv } = await import('./csvService.js');
 
-  const { combineCsvResults } = await import('./csvService.js');
+  // TOTALLOG CSV fallback: 3종 분리 CSV가 없으면 합본 CSV를 분리
+  let opText, dataText, evText;
+  if (!opFile && !dataFile && !evFile && totalFile) {
+    console.log('[CSV] TOTALLOG 합본 CSV 감지 — 섹션 분리:', totalFile.name);
+    const totalText = await readCsv(totalFile);
+    const split = splitTotalLogCsv(totalText);
+    opText   = split.opTimeText;
+    dataText = split.dataLogText;
+    evText   = split.eventText;
+    console.log('[CSV] TOTALLOG 분리 —',
+      `event: ${evText ? evText.split('\n').length + '줄' : 'null'}`,
+      `/ opTime: ${opText ? opText.split('\n').length + '줄' : 'null'}`,
+      `/ dataLog: ${dataText ? dataText.split('\n').length + '줄' : 'null'}`);
+  } else {
+    [opText, dataText, evText] = await Promise.all([
+      readCsv(opFile), readCsv(dataFile), readCsv(evFile)
+    ]);
+  }
+
   const parsed = combineCsvResults(opText, dataText, evText, vessel);
   console.log('[CSV] 파싱 완료 — ops:', parsed.operations.length,
     '/ tro:', parsed.tro_data ? 'OK' : 'null',

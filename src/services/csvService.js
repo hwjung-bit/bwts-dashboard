@@ -1013,6 +1013,32 @@ export function parseEventLogCsv(csvText) {
   };
 }
 
+// ── TOTALLOG CSV 분리 (합본 → 3종) ──────────────────────────────
+export function splitTotalLogCsv(csvText) {
+  if (!csvText) return { eventText: null, opTimeText: null, dataLogText: null };
+  const lines = csvText.split(/\r?\n/);
+  let opTimeStart = -1;
+  let dataLogStart = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    const upper = lines[i].toUpperCase().replace(/\s+/g, '');
+    if (opTimeStart < 0 && /^OPERATION,START/.test(upper)) {
+      opTimeStart = i;
+    }
+    if (dataLogStart < 0 && /^INDEX,TIME,OPERATION,REC/.test(upper)) {
+      dataLogStart = i;
+    }
+  }
+
+  return {
+    eventText:   opTimeStart > 0 ? lines.slice(0, opTimeStart).join('\n') : csvText,
+    opTimeText:  opTimeStart > 0
+      ? lines.slice(opTimeStart, dataLogStart > 0 ? dataLogStart : undefined).join('\n')
+      : null,
+    dataLogText: dataLogStart > 0 ? lines.slice(dataLogStart).join('\n') : null,
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────
 // 3종 결합 → validateAndNormalizeResult() 입력용 JSON
 // ─────────────────────────────────────────────────────────────────
