@@ -1,6 +1,7 @@
 // VesselTable - 선박 목록 테이블 (Stitch 디자인 적용)
 
 const ISSUE_CATEGORIES = [
+  { key: "Event Log 과다", match: (a) => a.code === "LOG_OVERFLOW" },
   { key: "처리수량",   match: (a) => /FMU|Flow|Volume|유량/i.test((a.code||"")+(a.description||"")) },
   { key: "배출기준",   match: (a) => /Deballass|배출|CODE201/i.test((a.code||"")+(a.description||"")) },
   { key: "TRO생성",    match: (a) => /TRO|Concentration|CODE200/i.test((a.code||"")+(a.description||"")) },
