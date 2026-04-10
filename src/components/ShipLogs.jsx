@@ -1,14 +1,5 @@
-// ShipLogs - 연도별 선박×월 수신현황 매트릭스 + CSV 변환
+// ShipLogs - 연도별 선박×월 수신현황 매트릭스
 import { useState } from "react";
-import { CONFIG } from "../config.js";
-import { collectMonthData } from "../services/driveService.js";
-import {
-  detectLogType,
-  buildCsvFileName,
-  extractVesselCode,
-  callCloudFunction,
-  uploadCsvToDrive,
-} from "../services/conversionService.js";
 
 const CURRENT_YEAR = new Date().getFullYear();
 const YEARS = Array.from({ length: 5 }, (_, i) => CURRENT_YEAR - i);
@@ -32,7 +23,7 @@ const STATUS_CELL = {
   NO_DATA:  { label: "—", cls: "bg-slate-50 text-slate-300 border-slate-100", dot: null },
 };
 
-function StatusCell({ status, hasCsv, hasPdf }) {
+function StatusCell({ status, reviewed, hasCsv, hasPdf }) {
   const s = STATUS_CELL[status] || STATUS_CELL.NO_DATA;
   if (status === "NO_DATA") {
     return (
@@ -47,24 +38,17 @@ function StatusCell({ status, hasCsv, hasPdf }) {
         {s.dot && <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${s.dot}`} />}
         {s.label}
       </div>
-      {(hasPdf || hasCsv) && (
-        <div className="flex gap-1">
-          {hasPdf && <span className="text-[9px] px-1 rounded bg-orange-50 text-orange-400 border border-orange-100">PDF</span>}
-          {hasCsv && <span className="text-[9px] px-1 rounded bg-green-50 text-green-500 border border-green-100">CSV</span>}
-        </div>
-      )}
+      <div className="flex gap-1">
+        {reviewed && <span className="text-[9px] px-1 rounded bg-indigo-50 text-indigo-500 border border-indigo-100">검토</span>}
+        {hasPdf && <span className="text-[9px] px-1 rounded bg-orange-50 text-orange-400 border border-orange-100">PDF</span>}
+        {hasCsv && <span className="text-[9px] px-1 rounded bg-green-50 text-green-500 border border-green-100">CSV</span>}
+      </div>
     </div>
   );
 }
 
-export default function ShipLogs({ vessels, accessToken, isAdmin }) {
+export default function ShipLogs({ vessels }) {
   const [year, setYear] = useState(String(CURRENT_YEAR));
-
-  // CSV 변환 상태
-  const [converting, setConverting] = useState(false);
-  const [convertingMonth, setConvertingMonth] = useState(null);
-  const [progress, setProgress] = useState(null);    // { current, total, vesselName, logType }
-  const [result, setResult] = useState(null);         // { success, failed, skipped, errors[] }
 
   // 12개월 × 선박별 상태 매트릭스 계산
   const allMonthData = MONTHS.map((m) => loadMonthlyData(year, m));
@@ -74,8 +58,14 @@ export default function ShipLogs({ vessels, accessToken, isAdmin }) {
     months: MONTHS.map((_, idx) => {
       const data = allMonthData[idx];
       const entry = data[v.id] || {};
+      // Show original status even when reviewed
+      const rawStatus = entry.analysisStatus || "NO_DATA";
+      const originalStatus = rawStatus === "REVIEWED"
+        ? (entry.analysisResult?.overall_status || "NORMAL")
+        : rawStatus;
       return {
-        status: entry.analysisStatus || "NO_DATA",
+        status: originalStatus,
+        reviewed: entry.reviewed || rawStatus === "REVIEWED",
         hasCsv: entry.hasCsv || false,
         hasPdf: entry.hasPdf || false,
       };
@@ -88,103 +78,6 @@ export default function ShipLogs({ vessels, accessToken, isAdmin }) {
     const csvCount = entries.filter(d => d.hasCsv).length;
     return { received: entries.length, csvCount };
   });
-
-  // ── CSV 변환 핸들러 ─────────────────────────────────────────
-  async function handleConvertMonth(monthNum) {
-    if (!accessToken || converting) return;
-
-    setConverting(true);
-    setConvertingMonth(monthNum);
-    setProgress(null);
-    setResult(null);
-
-    let success = 0, failed = 0, skipped = 0;
-    const errors = [];
-
-    try {
-      // 1. Drive에서 해당 월 모든 선박 폴더 조회
-      const monthStr = String(monthNum).padStart(2, "0");
-      const folders = await collectMonthData(
-        CONFIG.DRIVE_ROOT_FOLDER_ID, year, monthNum, accessToken
-      );
-
-      if (!folders || folders.length === 0) {
-        setResult({ success: 0, failed: 0, skipped: 0, errors: ["해당 월에 수신 폴더가 없습니다."] });
-        return;
-      }
-
-      // 2. 변환 작업 목록 구축 (CSV 없는 PDF만)
-      const tasks = [];
-      for (const folder of folders) {
-        const vesselCode = extractVesselCode(folder.vesselFolderName);
-        const existingCsvs = new Set(
-          (folder.csvFiles || []).map(f => f.name.toUpperCase())
-        );
-
-        for (const pdf of (folder.pdfs || [])) {
-          if (pdf.name.toUpperCase().includes("BWRB")) continue;
-
-          const logType = detectLogType(pdf.name);
-          const csvName = buildCsvFileName(vesselCode, year, monthStr, logType);
-
-          // 이미 CSV가 있으면 skip
-          if (existingCsvs.has(csvName.toUpperCase())) continue;
-
-          tasks.push({
-            pdf,
-            folderId: folder.folderId,
-            vesselCode,
-            logType,
-            csvName,
-          });
-        }
-      }
-
-      if (tasks.length === 0) {
-        setResult({ success: 0, failed: 0, skipped: 0, errors: [], message: "변환할 파일이 없습니다 (모든 CSV가 이미 존재)." });
-        return;
-      }
-
-      // 3. 순차 처리
-      for (let i = 0; i < tasks.length; i++) {
-        const t = tasks[i];
-        setProgress({ current: i + 1, total: tasks.length, vesselName: t.vesselCode, logType: t.logType });
-
-        try {
-          const cfResult = await callCloudFunction(t.pdf.id, accessToken);
-
-          if (cfResult.status === "skipped") {
-            skipped++;
-            continue;
-          }
-          if (cfResult.status === "error") {
-            failed++;
-            errors.push(`${t.vesselCode} ${t.logType}: ${cfResult.message}`);
-            continue;
-          }
-
-          // Drive에 업로드
-          await uploadCsvToDrive(t.folderId, t.csvName, cfResult.csv_content, accessToken);
-          success++;
-
-          if (cfResult.warning) {
-            errors.push(`${t.vesselCode} ${t.logType}: ${cfResult.warning} (변환은 완료)`);
-          }
-        } catch (err) {
-          failed++;
-          errors.push(`${t.vesselCode} ${t.logType}: ${err.message}`);
-        }
-      }
-    } catch (err) {
-      errors.push(`전체 오류: ${err.message}`);
-      failed++;
-    } finally {
-      setConverting(false);
-      setConvertingMonth(null);
-      setProgress(null);
-      setResult({ success, failed, skipped, errors });
-    }
-  }
 
   return (
     <div>
@@ -229,44 +122,6 @@ export default function ShipLogs({ vessels, accessToken, isAdmin }) {
         })}
       </div>
 
-      {/* 진행 표시 */}
-      {progress && (
-        <div className="mb-4 bg-blue-50 border border-blue-200 rounded-xl px-5 py-3 flex items-center gap-3">
-          <span className="w-4 h-4 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin shrink-0" />
-          <div className="text-sm text-blue-700">
-            <span className="font-semibold">{progress.vesselName}</span> {progress.logType} 변환 중...
-            <span className="ml-2 text-blue-500">({progress.current}/{progress.total})</span>
-          </div>
-        </div>
-      )}
-
-      {/* 결과 요약 */}
-      {result && (
-        <div className={`mb-4 border rounded-xl px-5 py-3 ${
-          result.failed > 0 ? "bg-amber-50 border-amber-200" : "bg-green-50 border-green-200"
-        }`}>
-          <div className="flex items-center justify-between">
-            <div className="text-sm">
-              {result.message ? (
-                <span className="text-slate-600">{result.message}</span>
-              ) : (
-                <>
-                  <span className="text-green-700 font-semibold">{result.success}건 완료</span>
-                  {result.failed > 0 && <span className="text-red-600 font-semibold ml-2">{result.failed}건 실패</span>}
-                  {result.skipped > 0 && <span className="text-slate-500 ml-2">{result.skipped}건 제외</span>}
-                </>
-              )}
-            </div>
-            <button onClick={() => setResult(null)} className="text-slate-400 hover:text-slate-600 text-sm">✕</button>
-          </div>
-          {result.errors?.length > 0 && (
-            <div className="mt-2 text-xs text-red-600 space-y-0.5">
-              {result.errors.map((e, i) => <div key={i}>• {e}</div>)}
-            </div>
-          )}
-        </div>
-      )}
-
       {/* 매트릭스 테이블 */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
         <table className="w-full text-sm border-collapse">
@@ -285,20 +140,6 @@ export default function ShipLogs({ vessels, accessToken, isAdmin }) {
                         <span className="text-green-400 ml-0.5">(CSV {monthSummary[m - 1].csvCount})</span>
                       )}
                     </div>
-                  )}
-                  {/* CSV 변환 버튼 (관리자 전용) */}
-                  {accessToken && isAdmin && (
-                    <button
-                      onClick={() => handleConvertMonth(m)}
-                      disabled={converting}
-                      className={`mt-1 px-1.5 py-0.5 text-[9px] rounded transition-colors ${
-                        convertingMonth === m
-                          ? "bg-blue-500 text-white"
-                          : "bg-slate-100 text-slate-400 hover:bg-blue-100 hover:text-blue-600"
-                      } disabled:opacity-50 disabled:cursor-not-allowed`}
-                    >
-                      {convertingMonth === m ? "변환중..." : "CSV"}
-                    </button>
                   )}
                 </th>
               ))}
@@ -323,7 +164,7 @@ export default function ShipLogs({ vessels, accessToken, isAdmin }) {
                 {months.map((cell, idx) => (
                   <td key={idx} className="px-2 py-3 text-center">
                     <div className="flex items-center justify-center">
-                      <StatusCell status={cell.status} hasCsv={cell.hasCsv} hasPdf={cell.hasPdf} />
+                      <StatusCell status={cell.status} reviewed={cell.reviewed} hasCsv={cell.hasCsv} hasPdf={cell.hasPdf} />
                     </div>
                   </td>
                 ))}
