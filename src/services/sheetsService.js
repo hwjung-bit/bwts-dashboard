@@ -176,10 +176,12 @@ export async function upsertMonthlyEntry(sheetId, vesselId, year, month, entry, 
       body: JSON.stringify({ values: [newRow] }),
     });
   } else {
-    // 새 행 append
-    const appendRange = encodeURIComponent("MonthlyData!A:H");
-    await fetch(`${BASE}/${sheetId}/values/${appendRange}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
-      method: "POST",
+    // 새 행: append 대신 정확한 행 번호 계산 후 PUT
+    // (append API는 H열의 긴 JSON으로 테이블 경계를 오판하여 엉뚱한 셀에 저장하는 버그 발생)
+    const nextRow = rows.length + 2; // rows는 A2부터 시작, 다음 빈 행
+    const writeRange = encodeURIComponent(`MonthlyData!A${nextRow}:H${nextRow}`);
+    await fetch(`${BASE}/${sheetId}/values/${writeRange}?valueInputOption=RAW`, {
+      method: "PUT",
       headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
       body: JSON.stringify({ values: [newRow] }),
     });
