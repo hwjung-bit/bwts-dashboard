@@ -124,8 +124,11 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
       if (isAdmin) {
         fbUpsertMonthlyEntry(vesselId, year, month, entry)
           .catch((e) => {
-            console.warn("Firestore upsert 실패:", e.message);
-            setSheetsError("Firestore 저장 실패 — 새로고침 시 데이터가 유실될 수 있습니다.");
+            console.error("Firestore upsert 실패:", e);
+            const hint = e.code === "permission-denied"
+              ? "권한 오류 — 관리자 설정 확인 필요"
+              : e.message || "알 수 없는 오류";
+            setSheetsError(`Firestore 저장 실패: ${hint}`);
           });
       }
       return next;

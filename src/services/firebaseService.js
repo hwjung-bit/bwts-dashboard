@@ -66,6 +66,21 @@ export function onAuthChange(callback) {
   return onAuthStateChanged(auth, callback);
 }
 
+// ── 공통 유틸: undefined 제거 (Firestore는 undefined 거부) ──
+function stripUndefined(obj) {
+  if (obj === null || obj === undefined) return null;
+  if (Array.isArray(obj)) return obj.map(stripUndefined).filter(v => v !== undefined);
+  if (typeof obj === "object") {
+    const out = {};
+    for (const [k, v] of Object.entries(obj)) {
+      if (v === undefined) continue;
+      out[k] = stripUndefined(v);
+    }
+    return out;
+  }
+  return obj;
+}
+
 // ── Vessels CRUD ────────────────────────────────────────────
 
 export async function readVessels() {
@@ -87,11 +102,12 @@ export async function writeVessels(vessels) {
       batch.delete(doc(db, "vessels", docSnap.id));
     }
   });
-  // 현재 vessels 전부 upsert
+  // 현재 vessels 전부 upsert (undefined 제거)
   for (const v of vessels) {
     const { id, ...data } = v;
+    const cleaned = stripUndefined(data);
     batch.set(doc(db, "vessels", id), {
-      ...data,
+      ...cleaned,
       updatedAt: serverTimestamp(),
     });
   }
@@ -100,9 +116,10 @@ export async function writeVessels(vessels) {
 
 export async function upsertVessel(vessel) {
   const { id, ...data } = vessel;
+  const cleaned = stripUndefined(data);
   await setDoc(
     doc(db, "vessels", id),
-    { ...data, updatedAt: serverTimestamp() },
+    { ...cleaned, updatedAt: serverTimestamp() },
     { merge: true }
   );
 }
@@ -146,14 +163,14 @@ export async function readMonthlyData(year, month) {
 export async function upsertMonthlyEntry(vesselId, year, month, entry) {
   const periodId = monthDocId(year, month);
   const ref = doc(db, "analyses", periodId, "vessels", vesselId);
+  const cleaned = stripUndefined({
+    ...entry,
+    year,
+    month,
+  });
   await setDoc(
     ref,
-    {
-      ...entry,
-      year,
-      month,
-      updatedAt: serverTimestamp(),
-    },
+    { ...cleaned, updatedAt: serverTimestamp() },
     { merge: true }
   );
 }
@@ -181,9 +198,10 @@ export async function readCalibration() {
 }
 
 export async function upsertCalibration(vesselCode, data) {
+  const cleaned = stripUndefined(data);
   await setDoc(
     doc(db, "calibration", vesselCode),
-    { ...data, updatedAt: serverTimestamp() },
+    { ...cleaned, updatedAt: serverTimestamp() },
     { merge: true }
   );
 }
