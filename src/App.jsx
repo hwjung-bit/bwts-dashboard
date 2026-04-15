@@ -1,143 +1,112 @@
 import { useState, useCallback, useEffect } from "react";
 import { CONFIG, INITIAL_VESSELS } from "./config.js";
-import { readVessels, writeVessels } from "./services/sheetsService.js";
+import {
+  auth,
+  signInWithGoogle,
+  signOut as fbSignOut,
+  onAuthChange,
+  readVessels,
+  writeVessels,
+  isAdmin as checkIsAdmin,
+} from "./services/firebaseService.js";
 import Dashboard from "./components/Dashboard.jsx";
 import VesselManager from "./components/VesselManager.jsx";
 import ShipLogs from "./components/ShipLogs.jsx";
 import CalibrationView from "./components/CalibrationView.jsx";
 
-async function fetchUserEmail(accessToken) {
-  const res = await fetch(`https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${accessToken}`);
-  if (!res.ok) return null;
-  const data = await res.json();
-  return data.email || null;
-}
-
-function loadGsi() {
-  return new Promise((resolve) => {
-    if (window.google?.accounts?.oauth2) { resolve(); return; }
-    const script = document.createElement("script");
-    script.src = "https://accounts.google.com/gsi/client";
-    script.onload = resolve;
-    document.head.appendChild(script);
-  });
-}
-
 const LS_KEY = "bwts_vessels";
-function loadVessels() {
+function loadVesselsCache() {
   try { const raw = localStorage.getItem(LS_KEY); return raw ? JSON.parse(raw) : null; }
   catch { return null; }
 }
-function saveVessels(vessels) { localStorage.setItem(LS_KEY, JSON.stringify(vessels)); }
+function saveVesselsCache(vessels) { localStorage.setItem(LS_KEY, JSON.stringify(vessels)); }
 
 export default function App() {
-  const [vessels, setVesselsRaw]      = useState(() => loadVessels() || INITIAL_VESSELS);
-  const [accessToken, setAccessToken] = useState(null);
+  const [vessels, setVesselsRaw]      = useState(() => loadVesselsCache() || INITIAL_VESSELS);
+  const [accessToken, setAccessToken] = useState(null); // Google API access token (Drive/Gmail)
   const [userEmail, setUserEmail]     = useState(null);
   const [authError, setAuthError]     = useState("");
   const [authLoading, setAuthLoading] = useState(false);
   const [autoLoginDone, setAutoLoginDone] = useState(false);
   const [showManager, setShowManager] = useState(false);
-  const [sheetsError, setSheetsError] = useState("");
-  const [activeView, setActiveView] = useState("dashboard");
+  const [dataError, setDataError]     = useState("");
+  const [activeView, setActiveView]   = useState("dashboard");
+  const [isAdminUser, setIsAdminUser] = useState(false);
 
-  const isAdmin = userEmail && CONFIG.ADMIN_EMAIL !== "YOUR_ADMIN_EMAIL@gmail.com"
-    ? userEmail === CONFIG.ADMIN_EMAIL
-    : !!accessToken;
+  // Firebase Auth 상태 관찰 (페이지 재로드 시 자동 복원)
+  useEffect(() => {
+    const unsubscribe = onAuthChange(async (user) => {
+      if (user && user.email?.endsWith("@ekmtc.com")) {
+        setUserEmail(user.email);
+        // 관리자 여부 체크
+        try {
+          const admin = await checkIsAdmin(user.email);
+          setIsAdminUser(admin);
+        } catch { setIsAdminUser(false); }
+        // vessels 로드
+        try {
+          const fbVessels = await readVessels();
+          if (fbVessels.length > 0) {
+            setVesselsRaw(fbVessels);
+            saveVesselsCache(fbVessels);
+            setDataError("");
+          }
+        } catch (e) {
+          setDataError(`Firestore 로드 실패: ${e.message}`);
+        }
+      } else {
+        setUserEmail(null);
+        setAccessToken(null);
+        setIsAdminUser(false);
+      }
+      setAutoLoginDone(true);
+      setAuthLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
 
-  const setVessels = useCallback((updater, token) => {
+  const setVessels = useCallback((updater) => {
     setVesselsRaw((prev) => {
       const next = typeof updater === "function" ? updater(prev) : updater;
-      saveVessels(next);
-      const tok = token || accessToken;
-      if (tok && CONFIG.SHEETS_ID) {
-        writeVessels(CONFIG.SHEETS_ID, next, tok).catch(console.warn);
+      saveVesselsCache(next);
+      if (isAdminUser) {
+        writeVessels(next).catch((e) => {
+          console.warn("Firestore writeVessels 실패:", e);
+          setDataError(`저장 실패: ${e.message}`);
+        });
       }
       return next;
     });
-  }, [accessToken]);
-
-  async function onLoginSuccess(token, email) {
-    localStorage.setItem("bwts_user_email", email);
-    setAccessToken(token);
-    setUserEmail(email);
-    if (CONFIG.SHEETS_ID) {
-      try {
-        const sheetVessels = await readVessels(CONFIG.SHEETS_ID, token);
-        if (sheetVessels.length > 0) {
-          setVesselsRaw(sheetVessels);
-          saveVessels(sheetVessels);
-          setSheetsError("");
-        } else {
-          const localVessels = loadVessels() || INITIAL_VESSELS;
-          writeVessels(CONFIG.SHEETS_ID, localVessels, token).catch(console.warn);
-          setSheetsError("Sheets가 비어있어 로컬 데이터를 사용합니다.");
-        }
-      } catch (e) {
-        setSheetsError(`Sheets 로드 실패: ${e.message}`);
-      }
-    }
-    setAuthLoading(false);
-  }
-
-  async function requestToken(silent = false) {
-    await loadGsi();
-    return new Promise((resolve, reject) => {
-      const client = window.google.accounts.oauth2.initTokenClient({
-        client_id: CONFIG.GOOGLE_CLIENT_ID,
-        scope: CONFIG.SCOPES,
-        prompt: silent ? "" : undefined,
-        callback: (tokenResponse) => {
-          if (tokenResponse.error) reject(new Error(tokenResponse.error));
-          else resolve(tokenResponse.access_token);
-        },
-        error_callback: (err) => reject(new Error(err?.type || "auth_error")),
-      });
-      client.requestAccessToken(silent ? { prompt: "" } : {});
-    });
-  }
-
-  useEffect(() => {
-    const savedEmail = localStorage.getItem("bwts_user_email");
-    if (!savedEmail) { setAutoLoginDone(true); return; }
-    setAuthLoading(true);
-    requestToken(true)
-      .then((token) => fetchUserEmail(token).then((email) => {
-        if (email && email.endsWith("@ekmtc.com")) return onLoginSuccess(token, email);
-        localStorage.removeItem("bwts_user_email");
-        setAuthLoading(false);
-      }))
-      .catch(() => setAuthLoading(false))
-      .finally(() => setAutoLoginDone(true));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [isAdminUser]);
 
   async function handleLogin() {
     setAuthLoading(true);
     setAuthError("");
     try {
-      const token = await requestToken(false);
-      const email = await fetchUserEmail(token);
+      const { user, accessToken: token, email } = await signInWithGoogle();
       if (!email || !email.endsWith("@ekmtc.com")) {
-        window.google?.accounts?.oauth2?.revoke(token);
+        await fbSignOut();
         setAuthError("회사 계정(@ekmtc.com)으로만 접속 가능합니다.");
         setAuthLoading(false);
         return;
       }
-      await onLoginSuccess(token, email);
+      setAccessToken(token);
+      // onAuthChange가 userEmail/isAdminUser/vessels 로드를 처리
     } catch (e) {
       setAuthError(`로그인 실패: ${e.message}`);
       setAuthLoading(false);
     }
   }
 
-  function handleLogout() {
-    if (accessToken && window.google?.accounts?.oauth2) {
-      window.google.accounts.oauth2.revoke(accessToken);
+  async function handleLogout() {
+    try {
+      await fbSignOut();
+    } catch (e) {
+      console.warn("로그아웃 실패:", e);
     }
-    localStorage.removeItem("bwts_user_email");
     setAccessToken(null);
     setUserEmail(null);
+    setIsAdminUser(false);
   }
 
   function addVessel(vessel)   { setVessels((prev) => [...prev, vessel]); }
@@ -146,9 +115,11 @@ export default function App() {
 
   const isConfigured =
     CONFIG.GOOGLE_CLIENT_ID !== "YOUR_GOOGLE_CLIENT_ID_HERE" &&
-    CONFIG.DRIVE_ROOT_FOLDER_ID !== "YOUR_DRIVE_ROOT_FOLDER_ID_HERE";
+    CONFIG.DRIVE_ROOT_FOLDER_ID !== "YOUR_DRIVE_ROOT_FOLDER_ID_HERE" &&
+    !!CONFIG.FIREBASE?.apiKey;
 
   const initials = userEmail ? userEmail[0].toUpperCase() : "?";
+  const isLoggedIn = !!userEmail;
 
   return (
     <div className="flex min-h-screen bg-[#f7f9fb] text-[#191c1e]" style={{ fontFamily: "'Inter', sans-serif" }}>
@@ -207,7 +178,7 @@ export default function App() {
               Reports
               <span className="ml-auto text-[10px] bg-slate-100 text-slate-300 px-1.5 py-0.5 rounded-full">준비중</span>
             </div>
-            {isAdmin && (
+            {isAdminUser && (
               <button
                 onClick={() => setShowManager(true)}
                 className="w-full flex items-center gap-3 px-4 py-2.5 text-slate-500 hover:text-[#003c69] hover:bg-white/70 rounded-xl text-sm font-medium cursor-pointer transition-colors text-left"
@@ -221,7 +192,7 @@ export default function App() {
 
         {/* 하단 사용자 영역 */}
         <div className="mt-auto px-5 py-5 border-t border-slate-200/70 space-y-1">
-          {accessToken ? (
+          {isLoggedIn ? (
             <>
               <div className="flex items-center gap-3 px-3 py-2 mb-1">
                 <div className="w-8 h-8 rounded-full bg-[#003c69] text-white text-xs flex items-center justify-center font-bold shrink-0">
@@ -229,7 +200,7 @@ export default function App() {
                 </div>
                 <div className="min-w-0">
                   <p className="text-xs font-medium text-slate-700 truncate">{userEmail}</p>
-                  {isAdmin && <p className="text-[10px] text-amber-600 font-semibold">관리자</p>}
+                  {isAdminUser && <p className="text-[10px] text-amber-600 font-semibold">관리자</p>}
                 </div>
               </div>
               <button
@@ -261,7 +232,7 @@ export default function App() {
             BWTS Log Analyzer
           </h2>
           <div className="flex items-center gap-3">
-            {!accessToken && (
+            {!isLoggedIn && (
               <button
                 onClick={handleLogin}
                 disabled={authLoading || !isConfigured}
@@ -283,7 +254,7 @@ export default function App() {
             <div className="mb-5 bg-amber-50 border border-amber-200 rounded-xl px-5 py-4">
               <div className="text-amber-700 font-medium text-sm mb-1">⚙️ API 키 설정 필요</div>
               <p className="text-amber-600 text-xs leading-relaxed">
-                <code className="bg-amber-100 px-1 rounded text-amber-800">src/config.js</code>에서 GOOGLE_CLIENT_ID, DRIVE_ROOT_FOLDER_ID, ADMIN_EMAIL을 입력하세요.
+                <code className="bg-amber-100 px-1 rounded text-amber-800">src/config.js</code>에서 GOOGLE_CLIENT_ID, DRIVE_ROOT_FOLDER_ID, FIREBASE 설정을 입력하세요.
               </p>
             </div>
           )}
@@ -293,10 +264,10 @@ export default function App() {
               {authError}
             </div>
           )}
-          {sheetsError && (
+          {dataError && (
             <div className="mb-4 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-700 flex justify-between items-center">
-              <span>⚠️ {sheetsError}</span>
-              <button onClick={() => setSheetsError("")} className="text-amber-400 hover:text-amber-600 ml-4">✕</button>
+              <span>⚠️ {dataError}</span>
+              <button onClick={() => setDataError("")} className="text-amber-400 hover:text-amber-600 ml-4">✕</button>
             </div>
           )}
 
@@ -304,17 +275,17 @@ export default function App() {
             <div className="flex items-center justify-center min-h-[60vh]">
               <span className="w-6 h-6 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin" />
             </div>
-          ) : accessToken ? (
+          ) : isLoggedIn ? (
             activeView === "shiplogs" ? (
               <ShipLogs vessels={vessels} />
             ) : activeView === "calibration" ? (
-              <CalibrationView accessToken={accessToken} />
+              <CalibrationView accessToken={accessToken} isAdmin={isAdminUser} />
             ) : (
               <Dashboard
                 vessels={vessels}
                 setVessels={setVessels}
                 accessToken={accessToken}
-                isAdmin={isAdmin}
+                isAdmin={isAdminUser}
               />
             )
           ) : (
@@ -348,7 +319,7 @@ export default function App() {
         </main>
       </div>
 
-      {showManager && isAdmin && (
+      {showManager && isAdminUser && (
         <VesselManager
           vessels={vessels}
           onAdd={addVessel}

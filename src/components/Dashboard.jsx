@@ -2,7 +2,11 @@
 import { useState, useEffect } from "react";
 import { collectMonthData } from "../services/driveService.js";
 import { analyzeCsvFromDrive, validateAndNormalizeResult } from "../services/analysisService.js";
-import { readMonthlyData, upsertMonthlyEntry, clearMonthlyData } from "../services/sheetsService.js";
+import {
+  readMonthlyData as fbReadMonthlyData,
+  upsertMonthlyEntry as fbUpsertMonthlyEntry,
+  clearMonthlyData as fbClearMonthlyData,
+} from "../services/firebaseService.js";
 import { mapOverallStatus, CONFIG } from "../config.js";
 import StatusCards from "./StatusCards.jsx";
 import VesselTable from "./VesselTable.jsx";
@@ -79,31 +83,27 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
   const [eventLogInputs, setEventLogInputs]   = useState({});  // { [vesselId]: string }
   const [eventLogParsing, setEventLogParsing] = useState({});
 
-  // 월/연도 변경 시 해당 월 데이터 로드 (Sheets 우선, fallback localStorage)
+  // 월/연도 변경 시 해당 월 데이터 로드 (Firestore 우선, fallback localStorage)
   useEffect(() => {
     setSelectedId(null);
-    if (accessToken && CONFIG.SHEETS_ID) {
-      setSheetsLoading(true);
-      readMonthlyData(CONFIG.SHEETS_ID, year, month, accessToken)
-        .then((sheetsData) => {
-          const localData = loadMonthlyData(year, month);
-          // 선박 단위 병합: lastAnalyzed 기준으로 더 최신 데이터 유지
-          const merged = { ...localData };
-          for (const [id, sheetsEntry] of Object.entries(sheetsData)) {
-            const local = localData[id];
-            if (!local || (sheetsEntry.lastAnalyzed || "") >= (local.lastAnalyzed || "")) {
-              merged[id] = sheetsEntry;
-            }
+    setSheetsLoading(true);
+    fbReadMonthlyData(year, month)
+      .then((fbData) => {
+        const localData = loadMonthlyData(year, month);
+        // 선박 단위 병합: lastAnalyzed 기준으로 더 최신 데이터 유지
+        const merged = { ...localData };
+        for (const [id, entry] of Object.entries(fbData)) {
+          const local = localData[id];
+          if (!local || (entry.lastAnalyzed || "") >= (local.lastAnalyzed || "")) {
+            merged[id] = entry;
           }
-          setMonthlyData(merged);
-          saveMonthlyData(year, month, merged);
-        })
-        .catch(() => setMonthlyData(loadMonthlyData(year, month)))
-        .finally(() => setSheetsLoading(false));
-    } else {
-      setMonthlyData(loadMonthlyData(year, month));
-    }
-  }, [year, month, accessToken]);
+        }
+        setMonthlyData(merged);
+        saveMonthlyData(year, month, merged);
+      })
+      .catch(() => setMonthlyData(loadMonthlyData(year, month)))
+      .finally(() => setSheetsLoading(false));
+  }, [year, month]);
 
   // 선박 정의 + 이번 달 분석 데이터 병합
   const displayVessels = vessels.map((v) => ({
@@ -114,18 +114,18 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
 
   const selectedVessel = displayVessels.find((v) => v.id === selectedId) || null;
 
-  // 특정 선박의 월별 데이터만 업데이트 (localStorage + Sheets 동기화)
+  // 특정 선박의 월별 데이터만 업데이트 (localStorage + Firestore 동기화)
   function updateMonthlyVessel(vesselId, updates) {
     setMonthlyData((prev) => {
       const entry = { ...(prev[vesselId] || {}), ...updates };
       const next = { ...prev, [vesselId]: entry };
       saveMonthlyData(year, month, next);
-      // Sheets upsert (비동기)
-      if (accessToken && CONFIG.SHEETS_ID) {
-        upsertMonthlyEntry(CONFIG.SHEETS_ID, vesselId, year, month, entry, accessToken)
+      // Firestore upsert (비동기)
+      if (isAdmin) {
+        fbUpsertMonthlyEntry(vesselId, year, month, entry)
           .catch((e) => {
-            console.warn("Sheets upsert 실패:", e.message);
-            setSheetsError("Sheets 저장 실패 — 새로고침 시 데이터가 유실될 수 있습니다.");
+            console.warn("Firestore upsert 실패:", e.message);
+            setSheetsError("Firestore 저장 실패 — 새로고침 시 데이터가 유실될 수 있습니다.");
           });
       }
       return next;
@@ -425,8 +425,8 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
                     saveMonthlyData(year, month, {});
                     setScanInfo(null);
                     setAnalyzeError("");
-                    if (accessToken && CONFIG.SHEETS_ID) {
-                      clearMonthlyData(CONFIG.SHEETS_ID, year, month, accessToken).catch(console.warn);
+                    if (isAdmin) {
+                      fbClearMonthlyData(year, month).catch(console.warn);
                     }
                   }}
                   disabled={analyzing}
