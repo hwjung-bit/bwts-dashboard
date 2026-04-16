@@ -1,6 +1,7 @@
 // AnnualView - 연간 월별 선박 상태 현황 차트
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, Cell } from "recharts";
+import { readMonthlyData } from "../services/firebaseService.js";
 
 const CURRENT_YEAR = new Date().getFullYear();
 const YEARS = Array.from({ length: 5 }, (_, i) => CURRENT_YEAR - i);
@@ -17,6 +18,13 @@ const STATUS_LABEL = {
   NORMAL:   "정상",
   RECEIVED: "수신",
 };
+
+function loadAnnualDataMonth(year, month) {
+  try {
+    const raw = localStorage.getItem(`bwts_monthly_${year}_${month}`);
+    return raw ? JSON.parse(raw) : {};
+  } catch { return {}; }
+}
 
 function loadAnnualData(year, vessels) {
   return Array.from({ length: 12 }, (_, i) => {
@@ -44,8 +52,33 @@ function loadAnnualData(year, vessels) {
 
 export default function AnnualView({ vessels }) {
   const [year, setYear] = useState(String(CURRENT_YEAR));
-  const data = loadAnnualData(year, vessels);
+  const [data, setData] = useState(() => loadAnnualData(year, vessels));
   const hasAnyData = data.some((d) => d.analyzed);
+
+  // Firestore에서 12개월 데이터 로드 후 차트 갱신
+  useEffect(() => {
+    Promise.all(
+      Array.from({ length: 12 }, (_, i) =>
+        readMonthlyData(year, i + 1).catch(() => ({}))
+      )
+    ).then((fbAll) => {
+      const updated = fbAll.map((fb, i) => {
+        const m = i + 1;
+        const counts = { NORMAL: 0, WARNING: 0, CRITICAL: 0, RECEIVED: 0 };
+        const merged = { ...loadAnnualDataMonth(year, m), ...fb };
+        if (Object.keys(merged).length === 0) {
+          return { month: `${m}월`, analyzed: false, ...counts };
+        }
+        vessels.forEach((v) => {
+          const s = merged[v.id]?.analysisStatus || "NO_DATA";
+          if (s === "REVIEWED") counts.NORMAL++;
+          else if (s in counts) counts[s]++;
+        });
+        return { month: `${m}월`, analyzed: true, ...counts };
+      });
+      setData(updated);
+    }).catch(() => setData(loadAnnualData(year, vessels)));
+  }, [year, vessels]);
 
   const totals = { NORMAL: 0, WARNING: 0, CRITICAL: 0, RECEIVED: 0 };
   data.forEach((d) => {

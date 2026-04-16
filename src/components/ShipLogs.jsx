@@ -1,11 +1,12 @@
 // ShipLogs - 연도별 선박×월 수신현황 매트릭스
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { readMonthlyData } from "../services/firebaseService.js";
 
 const CURRENT_YEAR = new Date().getFullYear();
 const YEARS = Array.from({ length: 5 }, (_, i) => CURRENT_YEAR - i);
 const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1);
 
-function loadMonthlyData(year, month) {
+function loadMonthlyDataLocal(year, month) {
   try {
     const raw = localStorage.getItem(`bwts_monthly_${year}_${month}`);
     return raw ? JSON.parse(raw) : {};
@@ -49,9 +50,33 @@ function StatusCell({ status, reviewed, hasCsv, hasPdf }) {
 
 export default function ShipLogs({ vessels }) {
   const [year, setYear] = useState(String(CURRENT_YEAR));
+  const [allMonthData, setAllMonthData] = useState(() =>
+    MONTHS.map((m) => loadMonthlyDataLocal(year, m))
+  );
+  const [loading, setLoading] = useState(false);
 
-  // 12개월 × 선박별 상태 매트릭스 계산
-  const allMonthData = MONTHS.map((m) => loadMonthlyData(year, m));
+  // Firestore에서 12개월 데이터 로드 (year 변경 시)
+  useEffect(() => {
+    setLoading(true);
+    Promise.all(
+      MONTHS.map((m) => readMonthlyData(year, m).catch(() => ({})))
+    ).then((fbData) => {
+      const merged = fbData.map((fb, idx) => {
+        const local = loadMonthlyDataLocal(year, idx + 1);
+        const result = { ...local };
+        for (const [id, entry] of Object.entries(fb)) {
+          const loc = local[id];
+          if (!loc || (entry.lastAnalyzed || "") >= (loc.lastAnalyzed || "")) {
+            result[id] = entry;
+          }
+        }
+        return result;
+      });
+      setAllMonthData(merged);
+    }).catch(() => {
+      setAllMonthData(MONTHS.map((m) => loadMonthlyDataLocal(year, m)));
+    }).finally(() => setLoading(false));
+  }, [year]);
 
   const matrix = vessels.map((v) => ({
     vessel: v,
