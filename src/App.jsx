@@ -5,6 +5,7 @@ import {
   signInWithGoogle,
   signOut as fbSignOut,
   onAuthChange,
+  getAccessToken,
   readVessels,
   writeVessels,
   isAdmin as checkIsAdmin,
@@ -43,6 +44,11 @@ export default function App() {
           const admin = await checkIsAdmin(user.email);
           setIsAdminUser(admin);
         } catch { setIsAdminUser(false); }
+        // accessToken 복원 (Drive/Gmail/Sheets API용)
+        try {
+          const token = await getAccessToken();
+          if (token) setAccessToken(token);
+        } catch { /* 토큰 없어도 Firestore 데이터 조회는 가능 */ }
         // vessels 로드
         try {
           const fbVessels = await readVessels();

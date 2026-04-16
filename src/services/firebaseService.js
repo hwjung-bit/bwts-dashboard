@@ -39,26 +39,50 @@ export const db = getFirestore(app);
  * Google 로그인 → Firebase Auth 세션 + Google API access_token 동시 획득
  * @returns {Promise<{user, accessToken, email}>}
  */
-export async function signInWithGoogle() {
+// Google API access_token 캐시
+let _cachedAccessToken = null;
+
+function _buildGoogleProvider() {
   const provider = new GoogleAuthProvider();
-  // Drive/Gmail/Sheets 스코프 추가
   provider.addScope("https://www.googleapis.com/auth/drive");
   provider.addScope("https://www.googleapis.com/auth/gmail.send");
   provider.addScope("https://www.googleapis.com/auth/spreadsheets");
+  return provider;
+}
 
+export async function signInWithGoogle() {
+  const provider = _buildGoogleProvider();
   const result = await signInWithPopup(auth, provider);
   const credential = GoogleAuthProvider.credentialFromResult(result);
-  const accessToken = credential?.accessToken;
-  const user = result.user;
-
+  _cachedAccessToken = credential?.accessToken || null;
   return {
-    user,
-    accessToken,
-    email: user.email,
+    user: result.user,
+    accessToken: _cachedAccessToken,
+    email: result.user.email,
   };
 }
 
+/**
+ * Google API accessToken 반환
+ * 캐시된 토큰이 있으면 반환, 없으면 조용한 재인증 시도
+ */
+export async function getAccessToken() {
+  if (_cachedAccessToken) return _cachedAccessToken;
+  // Firebase Auth 세션이 살아있으면 signInWithPopup으로 토큰 재획득
+  if (auth.currentUser) {
+    try {
+      const provider = _buildGoogleProvider();
+      const result = await signInWithPopup(auth, provider);
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      _cachedAccessToken = credential?.accessToken || null;
+      return _cachedAccessToken;
+    } catch { return null; }
+  }
+  return null;
+}
+
 export function signOut() {
+  _cachedAccessToken = null;
   return fbSignOut(auth);
 }
 
