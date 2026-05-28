@@ -86,6 +86,19 @@ export function signOut() {
   return fbSignOut(auth);
 }
 
+/**
+ * 현재 로그인 사용자의 Firebase ID 토큰 반환 (Cloud Function 인증용).
+ * 로그인 안 돼 있으면 null.
+ */
+export async function getIdToken() {
+  if (!auth.currentUser) return null;
+  try {
+    return await auth.currentUser.getIdToken();
+  } catch {
+    return null;
+  }
+}
+
 export function onAuthChange(callback) {
   return onAuthStateChanged(auth, callback);
 }
@@ -228,6 +241,29 @@ export async function upsertCalibration(vesselCode, data) {
     { ...cleaned, updatedAt: serverTimestamp() },
     { merge: true }
   );
+}
+
+// ── Global Settings (분석 토글 등) ──────────────────────────
+// 구조: /settings/global { useGeminiAnalysis: boolean, ... }
+
+let _cachedSettings = null;
+let _cachedSettingsAt = 0;
+const SETTINGS_TTL_MS = 60_000; // 1분 캐시 — 토글 즉시 반영 vs 읽기 비용 절충
+
+export async function getGlobalSettings({ force = false } = {}) {
+  const now = Date.now();
+  if (!force && _cachedSettings && now - _cachedSettingsAt < SETTINGS_TTL_MS) {
+    return _cachedSettings;
+  }
+  try {
+    const snap = await getDoc(doc(db, "settings", "global"));
+    _cachedSettings = snap.exists() ? snap.data() : { useGeminiAnalysis: false };
+  } catch (e) {
+    console.warn("[firebaseService] settings/global 읽기 실패:", e.message);
+    _cachedSettings = { useGeminiAnalysis: false };
+  }
+  _cachedSettingsAt = now;
+  return _cachedSettings;
 }
 
 // ── User Role (관리자 확인) ─────────────────────────────────

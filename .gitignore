@@ -7,6 +7,12 @@ scripts/service-account.json
 # Claude Code 로컬 설정 (자동 변경됨)
 .claude/settings.local.json
 
+# Firebase 배포 캐시
+.firebase/
+
+# Cloud Function 로컬 환경 (실 API 키)
+cloud-function-analyze/.env
+
 # Logs
 logs
 *.log

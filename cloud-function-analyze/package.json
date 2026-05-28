@@ -1,0 +1,20 @@
+{
+  "name": "bwts-analyze",
+  "version": "1.0.0",
+  "description": "BWTS analysis Cloud Function — Gemini 2.5 Flash judgment + summary, with deterministic JS fallback",
+  "type": "module",
+  "main": "index.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "functions-framework --target=analyze --port=8080",
+    "test": "node --test test/"
+  },
+  "dependencies": {
+    "@google-cloud/firestore": "^7.10.0",
+    "@google/genai": "^0.6.0",
+    "@google-cloud/functions-framework": "^3.4.2",
+    "firebase-admin": "^12.7.0"
+  }
+}

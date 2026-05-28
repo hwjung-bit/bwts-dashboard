@@ -257,7 +257,7 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
     } : prev);
   }
 
-  // 전체 선박 일괄 분석
+  // 전체 선박 일괄 분석 (동시성 3 풀 — Gemini Cloud Function 호출이 5~15초 걸리므로 병렬화)
   async function handleAnalyzeAll() {
     if (!accessToken) { setAnalyzeError("Google 로그인이 필요합니다."); return; }
     setAnalyzing(true);
@@ -271,30 +271,45 @@ export default function Dashboard({ vessels, setVessels, accessToken, isAdmin })
         return entry && (entry.pdfs.length > 0 || (entry.csvFiles?.length ?? 0) > 0);
       });
 
-      for (const vessel of targets) {
-        const mk = (vessel.vesselCode || vessel.name).toLowerCase();
-        const entry = monthData.find((d) => d.vesselFolderName.toLowerCase().includes(mk));
-        const displayName = vessel.vesselCode || vessel.name;
-        setAnalyzingNames([displayName]);
-        updateMonthlyVessel(vessel.id, { analysisStatus: "LOADING", analysisResult: null, analysisError: null });
-        try {
-          const csvFiles = entry?.csvFiles ?? [];
-          const vesselWithPeriod = { ...vessel, year, month };
-          const logPdfs = csvFiles.length > 0 ? [] : filterLogPdfs(entry.pdfs);
-          const result = await analyzeCsvFromDrive([...csvFiles, ...logPdfs], accessToken, vesselWithPeriod);
-          const mapped = mapOverallStatus(result?.overall_status, result?.error_alarms);
-          const finalStatus = mapped === "NO_DATA" ? "RECEIVED" : mapped;
-          updateMonthlyVessel(vessel.id, {
-            analysisStatus: finalStatus,
-            analysisResult: result,
-            analysisError: null,
-            lastAnalyzed: new Date().toISOString(),
-          });
-        } catch (err) {
-          updateMonthlyVessel(vessel.id, { analysisStatus: "RECEIVED", analysisError: err.message });
-          setAnalyzeError(`${displayName} 분석 실패: ${err.message}`);
+      const POOL_SIZE = 3;
+      const queue = [...targets];
+      const inFlight = new Set();
+
+      const worker = async () => {
+        while (queue.length > 0) {
+          const vessel = queue.shift();
+          if (!vessel) break;
+          const displayName = vessel.vesselCode || vessel.name;
+          const mk = (vessel.vesselCode || vessel.name).toLowerCase();
+          const entry = monthData.find((d) => d.vesselFolderName.toLowerCase().includes(mk));
+          inFlight.add(displayName);
+          setAnalyzingNames(Array.from(inFlight));
+          updateMonthlyVessel(vessel.id, { analysisStatus: "LOADING", analysisResult: null, analysisError: null });
+          try {
+            const csvFiles = entry?.csvFiles ?? [];
+            const vesselWithPeriod = { ...vessel, year, month };
+            const logPdfs = csvFiles.length > 0 ? [] : filterLogPdfs(entry.pdfs);
+            const result = await analyzeCsvFromDrive([...csvFiles, ...logPdfs], accessToken, vesselWithPeriod);
+            const mapped = mapOverallStatus(result?.overall_status, result?.error_alarms);
+            const finalStatus = mapped === "NO_DATA" ? "RECEIVED" : mapped;
+            updateMonthlyVessel(vessel.id, {
+              analysisStatus: finalStatus,
+              analysisResult: result,
+              analysisError: null,
+              lastAnalyzed: new Date().toISOString(),
+            });
+          } catch (err) {
+            updateMonthlyVessel(vessel.id, { analysisStatus: "RECEIVED", analysisError: err.message });
+            setAnalyzeError(`${displayName} 분석 실패: ${err.message}`);
+          } finally {
+            inFlight.delete(displayName);
+            setAnalyzingNames(Array.from(inFlight));
+          }
         }
-      }
+      };
+
+      const workerCount = Math.min(POOL_SIZE, targets.length);
+      await Promise.all(Array.from({ length: workerCount }, () => worker()));
     } catch (err) {
       setAnalyzeError(`분석 실패: ${err.message}`);
     } finally {

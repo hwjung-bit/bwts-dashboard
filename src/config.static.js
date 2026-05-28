@@ -92,7 +92,9 @@ export function mapOverallStatus(status, alarms = []) {
     if (s === "WARNING")                     return "WARNING";
     if (s === "CRITICAL" || s === "FAILURE") return "CRITICAL";
   }
-  const levels = (alarms ?? []).map((a) => (a.level ?? "").toLowerCase());
+  // VRCS_ERR은 BWTS 판정에서 제외 (별도 빨간 배지로 표시)
+  const bwtsAlarms = (alarms ?? []).filter((a) => a.code !== "VRCS_ERR");
+  const levels = bwtsAlarms.map((a) => (a.level ?? "").toLowerCase());
   if (levels.some((l) => l === "trip"))                      return "CRITICAL";
   if (levels.some((l) => l === "alarm" || l === "warning"))  return "WARNING";
   if (alarms && alarms.length === 0)                         return "NORMAL";
@@ -108,3 +110,9 @@ export const CALIB_CONFIG = {
   GID:            297341548,       // fallback용 (SHEET_NAME 있으면 미사용)
   STATUS_OPTIONS: ["", "진행 예정", "확인필요", "업체요청필요"],
 };
+
+// ── BWTS 분석 Cloud Function (Gemini 2.5 Flash + JS 폴백) ───
+// 비민감 값(공개 HTTPS 엔드포인트)이라 git 커밋 OK.
+// 빈 문자열이면 클라이언트 JS만 사용 (Cloud Function 미경유).
+export const ANALYZE_FUNCTION_URL =
+  "https://asia-northeast3-bwts-log-analysis.cloudfunctions.net/bwts-analyze";

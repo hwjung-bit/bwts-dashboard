@@ -1,14 +1,17 @@
 // VesselTable - 선박 목록 테이블 (Stitch 디자인 적용)
 
+// VRCS는 BWTS 판정과 분리되어 항상 빨간 배지로 표시 (forceRed)
+// 다른 카테고리는 VRCS_ERR을 매칭에서 제외하여 중복 표시 방지
 const ISSUE_CATEGORIES = [
+  { key: "VRCS",       match: (a) => a.code === "VRCS_ERR", forceRed: true },
   { key: "Event Log 과다", match: (a) => a.code === "LOG_OVERFLOW" },
-  { key: "처리수량",   match: (a) => /FMU|Flow|Volume|유량/i.test((a.code||"")+(a.description||"")) },
-  { key: "배출기준",   match: (a) => /Deballass|배출|CODE201/i.test((a.code||"")+(a.description||"")) },
-  { key: "TRO생성",    match: (a) => /TRO|Concentration|CODE200/i.test((a.code||"")+(a.description||"")) },
-  { key: "ANU중화",    match: (a) => /ANU|Tank\s*Level|Sodium|CODE30[123]/i.test((a.code||"")+(a.description||"")) },
-  { key: "Bypass",     match: (a) => /Bypass|EM.?CY/i.test(a.description||"") },
-  { key: "센서건전성", match: (a) => /Comm|Sensor|CODE7[02]/i.test((a.code||"")+(a.description||"")) },
-  { key: "알람",       match: (a) => a.level === "Alarm" || a.level === "Warning" },
+  { key: "처리수량",   match: (a) => a.code !== "VRCS_ERR" && /FMU|Flow|Volume|유량/i.test((a.code||"")+(a.description||"")) },
+  { key: "배출기준",   match: (a) => a.code !== "VRCS_ERR" && /Deballass|배출|CODE201/i.test((a.code||"")+(a.description||"")) },
+  { key: "TRO생성",    match: (a) => a.code !== "VRCS_ERR" && /TRO|Concentration|CODE200/i.test((a.code||"")+(a.description||"")) },
+  { key: "ANU중화",    match: (a) => a.code !== "VRCS_ERR" && /ANU|Tank\s*Level|Sodium|CODE30[123]/i.test((a.code||"")+(a.description||"")) },
+  { key: "Bypass",     match: (a) => a.code !== "VRCS_ERR" && /Bypass|EM.?CY/i.test(a.description||"") },
+  { key: "센서건전성", match: (a) => a.code !== "VRCS_ERR" && /Comm|Sensor|CODE7[02]/i.test((a.code||"")+(a.description||"")) },
+  { key: "알람",       match: (a) => a.code !== "VRCS_ERR" && (a.level === "Alarm" || a.level === "Warning") },
 ];
 
 function makeIssueBadges(vessel) {
@@ -26,7 +29,7 @@ function makeIssueBadges(vessel) {
       const m = (a.description || "").match(/×(\d+)회/);
       return sum + (m ? parseInt(m[1]) : 1);
     }, 0);
-    result.push({ key: cat.key, hasTrip, count });
+    result.push({ key: cat.key, hasTrip, count, forceRed: cat.forceRed });
   }
   return result;
 }
@@ -36,8 +39,10 @@ function makeStatusSummary(vessel) {
   if (!r) return null;
   const alarms = r.error_alarms || [];
   if (alarms.length === 0) return null;
-  const tripCount  = alarms.filter((a) => (a.level||"").toLowerCase() === "trip").length;
-  const alarmCount = alarms.filter((a) => (a.level||"").toLowerCase() !== "trip").length;
+  // VRCS는 BWTS 판정과 분리 — 종합 요약에서도 제외
+  const bwts = alarms.filter((a) => a.code !== "VRCS_ERR");
+  const tripCount  = bwts.filter((a) => (a.level||"").toLowerCase() === "trip").length;
+  const alarmCount = bwts.filter((a) => (a.level||"").toLowerCase() !== "trip").length;
   const parts = [];
   if (tripCount  > 0) parts.push(`Trip ${tripCount}건`);
   if (alarmCount > 0) parts.push(`알람 ${alarmCount}건`);
@@ -55,18 +60,21 @@ function IssueSummary({ vessel }) {
   );
   return (
     <div className="flex flex-wrap gap-1">
-      {badges.map((b) => (
-        <span
-          key={b.key}
-          className={`text-xs font-semibold px-2 py-0.5 rounded-md border ${
-            b.hasTrip
-              ? "text-red-600 bg-red-50 border-red-200"
-              : "text-amber-600 bg-amber-50 border-amber-200"
-          }`}
-        >
-          {b.key}{b.count > 1 ? ` ×${b.count}` : ""}
-        </span>
-      ))}
+      {badges.map((b) => {
+        const isRed = b.forceRed || b.hasTrip;
+        return (
+          <span
+            key={b.key}
+            className={`text-xs font-semibold px-2 py-0.5 rounded-md border ${
+              isRed
+                ? "text-red-600 bg-red-50 border-red-200"
+                : "text-amber-600 bg-amber-50 border-amber-200"
+            }`}
+          >
+            {b.key}{b.count > 1 ? ` ×${b.count}` : ""}
+          </span>
+        );
+      })}
     </div>
   );
 }
@@ -123,7 +131,7 @@ const STATUS_CONFIG = {
   },
 };
 
-function StatusBadge({ status, summary, reviewed }) {
+function StatusBadge({ status, summary, reviewed, fallback }) {
   // legacy REVIEWED → 검토완료 표기
   const effectiveStatus = status === "REVIEWED" ? "NORMAL" : (status || "NO_DATA");
   const isLegacyReviewed = status === "REVIEWED";
@@ -132,7 +140,7 @@ function StatusBadge({ status, summary, reviewed }) {
 
   return (
     <div className="flex flex-col gap-1">
-      <div className="flex items-center gap-1.5">
+      <div className="flex items-center gap-1.5 flex-wrap">
         <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border w-fit whitespace-nowrap ${s.cls}`}>
           <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${s.dot}`} />
           {s.label}
@@ -140,6 +148,14 @@ function StatusBadge({ status, summary, reviewed }) {
         {showReviewed && (
           <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-50 text-indigo-600 border border-indigo-200 whitespace-nowrap">
             ✓ 검토
+          </span>
+        )}
+        {fallback && (
+          <span
+            className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-500 border border-slate-200 whitespace-nowrap"
+            title="AI 분석 실패 또는 토글 OFF — 로컬 JS 결과 사용"
+          >
+            JS
           </span>
         )}
       </div>
@@ -227,7 +243,12 @@ export default function VesselTable({
 
                   {/* 종합 판단 */}
                   <td className="px-4 py-4 w-36">
-                    <StatusBadge status={v.analysisStatus || "NO_DATA"} summary={summary} reviewed={v.reviewed} />
+                    <StatusBadge
+                      status={v.analysisStatus || "NO_DATA"}
+                      summary={summary}
+                      reviewed={v.reviewed}
+                      fallback={v.analysisResult?._fallback === true}
+                    />
                   </td>
 
                   {/* 주요 이상 항목 */}

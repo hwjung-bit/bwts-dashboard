@@ -10,6 +10,7 @@ import {
   VALVE_PATTERN,
   VALVE_CODES,
 } from "./alarmInfo.js";
+import { ANALYZE_FUNCTION_URL } from "../config.static.js";
 
 
 // ── JSON parsing (with newline/truncation recovery) ─────────
@@ -126,39 +127,79 @@ function checkTroRange(data) {
 
 
 // ── overall_status full JS recalculation ────────────────────
+// 판정 기준 (2026-05 개편):
+//   - VRCS_ERR 알람은 BWTS 판정에서 제외 (별도 빨간 배지로 분리 표시)
+//   - 임계값 완화: Trip 5건+ / 반복 15회+ = CRITICAL (×N회 합산)
+//   - 최근 운전 기준: 최근 7일 내 알람·TRO 이상 없으면 NORMAL로 완화
 function recalcOverallStatus(data) {
-  const alarms = data.error_alarms || [];
-  const tro    = data.tro_data    || {};
+  const allAlarms = data.error_alarms || [];
+  const tro       = data.tro_data    || {};
+  const ops       = data.operations  || [];
 
-  const tripCount = alarms.filter((a) => (a.level || "").toLowerCase() === "trip").length;
+  // VRCS_ERR 제외 (BWTS 판정과 분리)
+  const bwtsAlarms = allAlarms.filter((a) => a.code !== "VRCS_ERR");
 
-  const maxRepeat = alarms.reduce((max, a) => {
+  const parseRepeat = (a) => {
     const m = (a.description || "").match(/×(\d+)회/);
-    return Math.max(max, m ? parseInt(m[1]) : 1);
-  }, 0);
+    return m ? parseInt(m[1]) : 1;
+  };
+
+  // ×N회 합산하여 실제 발생 건수로 카운트
+  const tripCount = bwtsAlarms
+    .filter((a) => (a.level || "").toLowerCase() === "trip")
+    .reduce((sum, a) => sum + parseRepeat(a), 0);
+
+  const maxRepeat = bwtsAlarms.reduce((max, a) => Math.max(max, parseRepeat(a)), 0);
 
   const troSafetyVal    = tro.ballasting_min ?? tro.ballasting_avg;
   const troBallastBad   = troSafetyVal != null && (troSafetyVal < 5 || troSafetyVal > 10);
   const troDeballastBad = tro.deballasting_max  != null && tro.deballasting_max > 0.1;
 
-  const hasLogOverflow = alarms.some((a) => a.code === "LOG_OVERFLOW");
+  const hasLogOverflow = bwtsAlarms.some((a) => a.code === "LOG_OVERFLOW");
 
-  const ops          = data.operations || [];
   const hadBallast   = ops.some((o) => /BALLAST/i.test(o.operation_mode || "") && !/DE/i.test(o.operation_mode || ""));
   const hadDeballast = ops.some((o) => /DEBALLAST/i.test(o.operation_mode || ""));
   const troAllNull   = (hadBallast   && tro.ballasting_avg == null && tro.ballasting_min == null)
                     || (hadDeballast && tro.deballasting_max == null);
 
+  // 새 기준 (완화B 기반)
   let jsStatus;
-  if (tripCount >= 1 || maxRepeat >= 5) {
+  if (tripCount >= 5 || maxRepeat >= 15) {
     jsStatus = "CRITICAL";
   } else if (
-    maxRepeat >= 3 || alarms.length >= 3 ||
+    tripCount >= 1 || maxRepeat >= 5 || bwtsAlarms.length >= 5 ||
     troBallastBad || troDeballastBad || troAllNull || hasLogOverflow
   ) {
     jsStatus = "WARNING";
   } else {
     jsStatus = "NORMAL";
+  }
+
+  // 최근 운전 기준 판정: 최근 7일 내 BWTS 이상 없고 TRO도 정상이면 NORMAL로 완화
+  // (과거 이슈는 "주요 이상 항목" 배지에 그대로 유지)
+  if (jsStatus !== "NORMAL") {
+    const opDates = ops.map((o) => o.date).filter(Boolean).sort();
+    const lastOpDate = opDates[opDates.length - 1];
+    if (lastOpDate) {
+      const RECENT_WINDOW_DAYS = 7;
+      const cutoff = new Date(lastOpDate + "T00:00:00Z");
+      cutoff.setUTCDate(cutoff.getUTCDate() - RECENT_WINDOW_DAYS);
+      const cutoffStr = cutoff.toISOString().slice(0, 10);
+
+      const getAlarmLastDate = (a) => {
+        if (!a.date) return null;
+        const m = a.date.match(/~(\d{4}-\d{2}-\d{2})$/);
+        return m ? m[1] : a.date;
+      };
+      const recentAlarms = bwtsAlarms.filter((a) => {
+        const last = getAlarmLastDate(a);
+        return last && last >= cutoffStr;
+      });
+
+      if (recentAlarms.length === 0 && !troBallastBad && !troDeballastBad) {
+        jsStatus = "NORMAL";
+      }
+    }
   }
 
   data.overall_status = jsStatus;
@@ -353,8 +394,16 @@ function autoFillRemarks(data) {
     volDetailEn = ` Total: ${partsEn.join(', ')}.`;
   }
 
-  koLines.push(`[운전 현황] 주입 ${ballastCount}회 / 배출 ${deballastCount}회. 주입 TRO ${bTroKo}. 배출 TRO 최댓값 ${dTroKo}.${volDetail}`);
-  enLines.push(`[Operations] ${ballastCount} ballasting / ${deballastCount} deballasting. Ballasting TRO ${bTroEn}. Deballasting TRO max ${dTroEn}.${volDetailEn}`);
+  // 실운용 일수: 하루 내 여러 회 운전해도 1일로 카운트 (date unique)
+  const ballastDates   = new Set(ops.filter(o => /^BALLAST$/i.test(o.operation_mode || "")).map(o => o.date).filter(Boolean));
+  const deballastDates = new Set(ops.filter(o => /^DEBALLAST$/i.test(o.operation_mode || "")).map(o => o.date).filter(Boolean));
+  const allOpDates     = new Set([...ballastDates, ...deballastDates]);
+  const opDays         = allOpDates.size;
+  const opDaysKo = opDays > 0 ? `운용 ${opDays}일(발라스팅 ${ballastDates.size}일 / 디발라스팅 ${deballastDates.size}일). ` : '';
+  const opDaysEn = opDays > 0 ? `${opDays} day(s) operated (ballast ${ballastDates.size}d / deballast ${deballastDates.size}d). ` : '';
+
+  koLines.push(`[운전 현황] ${opDaysKo}주입 ${ballastCount}회 / 배출 ${deballastCount}회. 주입 TRO ${bTroKo}. 배출 TRO 최댓값 ${dTroKo}.${volDetail}`);
+  enLines.push(`[Operations] ${opDaysEn}${ballastCount} ballasting / ${deballastCount} deballasting. Ballasting TRO ${bTroEn}. Deballasting TRO max ${dTroEn}.${volDetailEn}`);
 
   // ─ [ECU/FMU 분석] ──────────────────────────────────────────
   if (tro.ecu_current_avg != null || tro.fmu_flow_avg != null || tro.anu_status) {
@@ -401,10 +450,12 @@ function autoFillRemarks(data) {
   } else {
     const codeMap = new Map();
     for (const a of alarms) {
+      if (a.code === "VRCS_ERR") continue; // VRCS는 alarm_summary에서 제외 (BWTS 판정과 분리)
       const code = a.code || "(코드없음)";
       if (!codeMap.has(code)) codeMap.set(code, { trips: 0, alarms: 0, total: 0 });
       const g = codeMap.get(code);
-      const cnt = a.count || 1;
+      const m = (a.description || "").match(/×(\d+)회/);
+      const cnt = m ? parseInt(m[1]) : (a.count || 1);
       if ((a.level || "").toLowerCase() === "trip") g.trips += cnt;
       else g.alarms += cnt;
       g.total += cnt;
@@ -469,10 +520,22 @@ function autoFillRemarks(data) {
     enLines.push(`[Operating Area] ${gpsAreas.join(', ')}.`);
   }
 
+  // ─ [VRCS] 별도 라인 (BWTS 판정과 분리) ────────────────────
+  const vrcsCount = alarms.filter(a => a.code === "VRCS_ERR")
+    .reduce((s, a) => {
+      const m = (a.description || "").match(/×(\d+)회/);
+      return s + (m ? parseInt(m[1]) : (a.count || 1));
+    }, 0);
+  if (vrcsCount > 0) {
+    koLines.push(`[VRCS] 밸브 제어 시스템 알람 ${vrcsCount}건 — BWTS 판정과 별개로 별도 조치 필요.`);
+    enLines.push(`[VRCS] Valve control system alarms detected ${vrcsCount} time(s) — requires separate action, excluded from BWTS judgment.`);
+  }
+
   // ─ [종합] ─────────────────────────────────────────────────
   const status = (data.overall_status || "NORMAL").toUpperCase();
-  const tripCount = alarms.filter(a => (a.level || "").toLowerCase() === "trip").reduce((s, a) => s + (a.count || 1), 0);
-  const alarmCount = alarms.reduce((s, a) => s + (a.count || 1), 0) - tripCount;
+  const bwtsForCount = alarms.filter(a => a.code !== "VRCS_ERR");
+  const tripCount = bwtsForCount.filter(a => (a.level || "").toLowerCase() === "trip").reduce((s, a) => s + (a.count || 1), 0);
+  const alarmCount = bwtsForCount.reduce((s, a) => s + (a.count || 1), 0) - tripCount;
 
   const issues = [];
   const issuesEn = [];
@@ -618,5 +681,76 @@ export async function analyzeCsvFromDrive(files, accessToken, vessel = {}) {
     '/ tro:', parsed.tro_data ? 'OK' : 'null',
     '/ alarms:', parsed.error_alarms.length,
     '/ eventLogMissing:', parsed._event_log_missing);
-  return validateAndNormalizeResult(parsed, null);
+  const local = validateAndNormalizeResult(parsed, null);
+  // ANALYZE_FUNCTION_URL이 설정되어 있으면 Cloud Function(Gemini)로 한 번 더 가공
+  // 실패 시 JS 결과 그대로 반환 (점진적 마이그레이션 안전망)
+  return await enrichWithGemini(local, vessel);
+}
+
+
+// ── Gemini Cloud Function 통합 ──────────────────────────────
+// CONFIG.ANALYZE_FUNCTION_URL이 있으면 클라이언트 JS 결과를 입력으로 Gemini 분석 호출.
+// 응답이 오면 overall_status / ai_remarks / ai_remarks_en / alarm_summary만 덮어쓰고
+// 메타 플래그(_gemini_meta, _fallback, _cached)를 결과에 첨부.
+async function enrichWithGemini(data, vessel = {}) {
+  const url = ANALYZE_FUNCTION_URL;
+  if (!url) return data;
+  // 빈 데이터(분석 대상 없음)는 호출 스킵
+  const alarms = data.error_alarms || [];
+  const ops = data.operations || [];
+  if (alarms.length === 0 && ops.length === 0) return data;
+
+  const period = data.period
+    || (vessel.year && vessel.month ? `${vessel.year}_${String(vessel.month).padStart(2, "0")}` : null);
+  const input = {
+    vessel_name: data.vessel_name || vessel.name || null,
+    imo_number:  vessel.imoNumber || null,
+    period,
+    operations:          ops,
+    tro_data:            data.tro_data || {},
+    error_alarms:        alarms,
+    op_time_stats:       data.op_time_stats || {},
+    op_time_anomalies:   data.op_time_anomalies || [],
+    event_log_analysis:  data.event_log_analysis || {},
+    data_log_efficiency: data.data_log_efficiency || null,
+    gps_areas:           data.gps_areas || [],
+  };
+
+  try {
+    const t0 = Date.now();
+    // Firebase ID 토큰으로 인증 (Cloud Function이 로그인 사용자만 허용)
+    const { getIdToken } = await import("./firebaseService.js");
+    const idToken = await getIdToken();
+    const headers = { "Content-Type": "application/json" };
+    if (idToken) headers.Authorization = `Bearer ${idToken}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ input }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+    const out = await res.json();
+    if (!out || typeof out !== "object") throw new Error("응답 형식 오류");
+
+    console.log("[Gemini] 응답",
+      "status:", out.overall_status,
+      "fallback:", !!out._fallback,
+      "cached:", !!out._cached,
+      "latency_total_ms:", Date.now() - t0);
+
+    return {
+      ...data,
+      overall_status: out.overall_status || data.overall_status,
+      ai_remarks:    Array.isArray(out.ai_remarks)    ? out.ai_remarks    : data.ai_remarks,
+      ai_remarks_en: Array.isArray(out.ai_remarks_en) ? out.ai_remarks_en : data.ai_remarks_en,
+      alarm_summary: Array.isArray(out.alarm_summary) ? out.alarm_summary : data.alarm_summary,
+      _gemini_meta:  out._gemini_meta || null,
+      _fallback:     !!out._fallback,
+      _cached:       !!out._cached,
+      _toggle_off:   !!out._toggle_off,
+    };
+  } catch (e) {
+    console.warn("[Gemini] 호출 실패 — 클라이언트 JS 결과 사용:", e.message);
+    return { ...data, _fallback: true, _gemini_error: e.message };
+  }
 }
