@@ -342,16 +342,25 @@ function autoFillRemarks(data) {
 
   // VRCS 별도 라인
   const vrcsCount = alarms.filter(a => a.code === "VRCS_ERR")
-    .reduce((s, a) => s + (a.count || 1), 0);
+    .reduce((s, a) => {
+      const m = (a.description || "").match(/×(\d+)회/);
+      return s + (m ? parseInt(m[1]) : (a.count || 1));
+    }, 0);
   if (vrcsCount > 0) {
     koLines.push(`[VRCS] 밸브 제어 시스템 알람 ${vrcsCount}건 — BWTS 판정과 별개로 별도 조치 필요.`);
     enLines.push(`[VRCS] Valve control system alarms detected ${vrcsCount} time(s) — requires separate action, excluded from BWTS judgment.`);
   }
 
   const status = (data.overall_status || "NORMAL").toUpperCase();
+  // groupRepeatAlarms 이후엔 count 필드가 없고 description에 "×N회"만 남으므로
+  // 반드시 ×N회를 파싱해야 실제 발생 건수가 나온다 (count fallback은 미그룹 입력용)
+  const parseCount = (a) => {
+    const m = (a.description || "").match(/×(\d+)회/);
+    return m ? parseInt(m[1]) : (a.count || 1);
+  };
   const bwtsForCount = alarms.filter(a => a.code !== "VRCS_ERR");
-  const tripCount = bwtsForCount.filter(a => (a.level || "").toLowerCase() === "trip").reduce((s, a) => s + (a.count || 1), 0);
-  const alarmCount = bwtsForCount.reduce((s, a) => s + (a.count || 1), 0) - tripCount;
+  const tripCount = bwtsForCount.filter(a => (a.level || "").toLowerCase() === "trip").reduce((s, a) => s + parseCount(a), 0);
+  const alarmCount = bwtsForCount.reduce((s, a) => s + parseCount(a), 0) - tripCount;
 
   const issues = [];
   const issuesEn = [];

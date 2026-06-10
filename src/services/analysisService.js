@@ -533,9 +533,15 @@ function autoFillRemarks(data) {
 
   // ─ [종합] ─────────────────────────────────────────────────
   const status = (data.overall_status || "NORMAL").toUpperCase();
+  // groupRepeatAlarms 이후엔 count 필드가 없고 description에 "×N회"만 남으므로
+  // 반드시 ×N회를 파싱해야 실제 발생 건수가 나온다 (count fallback은 미그룹 입력용)
+  const parseCount = (a) => {
+    const m = (a.description || "").match(/×(\d+)회/);
+    return m ? parseInt(m[1]) : (a.count || 1);
+  };
   const bwtsForCount = alarms.filter(a => a.code !== "VRCS_ERR");
-  const tripCount = bwtsForCount.filter(a => (a.level || "").toLowerCase() === "trip").reduce((s, a) => s + (a.count || 1), 0);
-  const alarmCount = bwtsForCount.reduce((s, a) => s + (a.count || 1), 0) - tripCount;
+  const tripCount = bwtsForCount.filter(a => (a.level || "").toLowerCase() === "trip").reduce((s, a) => s + parseCount(a), 0);
+  const alarmCount = bwtsForCount.reduce((s, a) => s + parseCount(a), 0) - tripCount;
 
   const issues = [];
   const issuesEn = [];

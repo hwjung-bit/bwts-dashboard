@@ -107,21 +107,14 @@ async function writeCache(hash, result, meta) {
 
 
 // ── Gemini 호출 ─────────────────────────────────────────────
-async function callGemini(input) {
+// base = runFallback(input) 결과(확정 판정/요약). Gemini는 그 초안 소견만 윤문한다.
+async function callGemini(base) {
   if (!ai) throw new Error("GEMINI_API_KEY 미설정");
 
-  const userPayload = {
-    vessel_name: input.vessel_name || null,
-    imo_number:  input.imo_number  || null,
-    period:      input.period      || null,
-    operations:        input.operations        || [],
-    tro_data:          input.tro_data          || {},
-    error_alarms:      input.error_alarms      || [],
-    op_time_stats:     input.op_time_stats     || {},
-    op_time_anomalies: input.op_time_anomalies || [],
-    event_log_analysis:  input.event_log_analysis  || {},
-    data_log_efficiency: input.data_log_efficiency || null,
-    gps_areas:         input.gps_areas         || [],
+  const facts = {
+    overall_status: base.overall_status,
+    draft_ko: base.ai_remarks,
+    draft_en: base.ai_remarks_en,
   };
 
   const t0 = Date.now();
@@ -130,14 +123,14 @@ async function callGemini(input) {
     contents: [
       {
         role: "user",
-        parts: [{ text: "다음 BWTS 운전 로그(JSON)를 분석하라:\n\n" + JSON.stringify(userPayload) }],
+        parts: [{ text: "다음 BWTS 분석 초안 소견(JSON)을 윤문하라:\n\n" + JSON.stringify(facts) }],
       },
     ],
     config: {
       systemInstruction: SYSTEM_PROMPT,
       responseMimeType: "application/json",
       responseSchema: RESPONSE_SCHEMA,
-      temperature: 0.1,
+      temperature: 0.2,
     },
   });
   const latency = Date.now() - t0;
@@ -150,14 +143,13 @@ async function callGemini(input) {
     throw new Error(`Gemini JSON 파싱 실패: ${e.message}. raw=${text.slice(0, 300)}`);
   }
 
-  // 스키마 후검증
-  if (!["NORMAL", "WARNING", "CRITICAL"].includes(parsed.overall_status)) {
-    throw new Error(`Gemini 스키마 위반: overall_status=${parsed.overall_status}`);
-  }
+  // 스키마 후검증: remarks 두 배열만 확인 (판정/요약은 JS 확정값 사용)
   if (!Array.isArray(parsed.ai_remarks) || !Array.isArray(parsed.ai_remarks_en)) {
     throw new Error("Gemini 스키마 위반: remarks가 배열 아님");
   }
-  if (!Array.isArray(parsed.alarm_summary)) parsed.alarm_summary = [];
+  if (parsed.ai_remarks.length === 0) {
+    throw new Error("Gemini 빈 소견 반환");
+  }
 
   const meta = {
     model: GEMINI_MODEL,
@@ -167,7 +159,10 @@ async function callGemini(input) {
     finish_reason: response.candidates?.[0]?.finishReason || null,
   };
 
-  return { result: parsed, meta };
+  return {
+    remarks: { ai_remarks: parsed.ai_remarks, ai_remarks_en: parsed.ai_remarks_en },
+    meta,
+  };
 }
 
 
@@ -198,11 +193,13 @@ functions.http("analyze", async (req, res) => {
     }
     const rulebookVersion = body.rulebook_version || RULEBOOK_VERSION;
 
+    // JS 결정론적 판정/요약 — 항상 먼저 산출 (확정 overall_status·alarm_summary·초안 소견)
+    const base = runFallback(input);
+
     // 1) 토글 확인
     const settings = await getToggle();
     if (!settings.useGeminiAnalysis) {
-      const result = runFallback(input);
-      return res.status(200).json({ ...result, _fallback: true, _toggle_off: true });
+      return res.status(200).json({ ...base, _fallback: true, _toggle_off: true });
     }
 
     // 2) 캐시 조회
@@ -213,10 +210,17 @@ functions.http("analyze", async (req, res) => {
       return res.status(200).json({ ...rest, _cached: true });
     }
 
-    // 3) Gemini 호출
+    // 3) Gemini — 소견(ai_remarks)만 윤문. 판정·요약은 JS 확정값을 그대로 사용.
     try {
-      const { result, meta } = await callGemini(input);
-      const finalResult = { ...result, _gemini_meta: meta, _fallback: false };
+      const { remarks, meta } = await callGemini(base);
+      const finalResult = {
+        overall_status: base.overall_status,
+        alarm_summary:  base.alarm_summary,
+        ai_remarks:     remarks.ai_remarks,
+        ai_remarks_en:  remarks.ai_remarks_en,
+        _gemini_meta:   meta,
+        _fallback:      false,
+      };
       // 캐시 저장 (fire-and-forget이 아닌 await — 동일 요청 중복 호출 방지)
       await writeCache(hash, finalResult, meta);
       return res.status(200).json(finalResult);
@@ -226,9 +230,8 @@ functions.http("analyze", async (req, res) => {
         period: input.period,
         err: geminiErr.message,
       });
-      const result = runFallback(input);
       return res.status(200).json({
-        ...result,
+        ...base,
         _fallback: true,
         _gemini_error: geminiErr.message,
       });

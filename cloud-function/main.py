@@ -17,8 +17,18 @@ ALLOWED_ORIGINS = [
     "http://localhost:4173",
 ]
 
-# EVENTLOG 파일 크기 제한 (5MB)
-MAX_EVENTLOG_SIZE = 5 * 1024 * 1024
+# EVENTLOG 파일 크기 상한 (50MB) — 추출 자체가 위험한 극단값만 차단.
+# 기존엔 5MB만 넘어도 변환을 통째로 포기했으나, 채터링·반복알람이 심한
+# (= 가장 분석이 필요한) 선박일수록 EVENTLOG가 커지는 모순이 있어 상한을 올린다.
+# 5MB~50MB 구간은 아래 _filter_eventlog_noise로 Normal 노이즈를 걸러 정상 변환한다.
+MAX_EVENTLOG_SIZE = 50 * 1024 * 1024
+
+# EVENTLOG에서 LEVEL=Normal 이라도 보존해야 하는 행
+# (클라이언트 csvService.parseEventLogCsv가 이 키워드들을 카운트한다):
+#   비정상 종료 / GPS 시각 보정 / HMI 전원 / VRCS 밸브 채터링(Valve Opened/Closed)
+EVENTLOG_KEEP_NORMAL = (
+    "terminated", "gps time set", "hmi power on", "valve opened", "valve closed",
+)
 
 
 def _cors_headers(origin):
@@ -108,6 +118,26 @@ def _is_eventlog(filename):
     return "EVENTLOG" in name_upper or "EVENT_LOG" in name_upper
 
 
+def _filter_eventlog_noise(rows):
+    """EVENTLOG 전용: LEVEL=Normal 이면서 의미 없는 행을 제거해 CSV 크기를 줄인다.
+    - 헤더 행, Trip/Alarm/Warning 행은 그대로 유지
+    - Normal 행은 EVENTLOG_KEEP_NORMAL 키워드(채터링·비정상종료 등)를 포함할 때만 유지
+    EVENTLOG는 대부분 Normal(운전상태) 로그라, 이 필터만으로 크기가 크게 줄어든다.
+    """
+    filtered = []
+    for row in rows:
+        cells_lower = [c.strip().lower() for c in row]
+        is_normal = "normal" in cells_lower  # LEVEL 컬럼 값이 정확히 'normal'인 행
+        if is_normal:
+            joined = " ".join(cells_lower)
+            if any(kw in joined for kw in EVENTLOG_KEEP_NORMAL):
+                filtered.append(row)
+            # else: 노이즈 → 제거
+        else:
+            filtered.append(row)
+    return filtered
+
+
 @functions_framework.http
 def convert_pdf(request):
     """
@@ -144,16 +174,27 @@ def convert_pdf(request):
                 200, origin
             )
 
-        # 3. EVENTLOG 5MB 초과 체크
-        if _is_eventlog(filename) and file_size > MAX_EVENTLOG_SIZE:
+        is_eventlog = _is_eventlog(filename)
+
+        # 3. EVENTLOG 상한(50MB) 초과만 차단 — 추출 자체가 위험한 극단값
+        if is_eventlog and file_size > MAX_EVENTLOG_SIZE:
             csv_content = "\ufeff페이지 과도 : 검토필요\n"
             return _json_response(
-                {"status": "success", "csv_content": csv_content, "warning": "EVENTLOG 5MB 초과"},
+                {"status": "success", "csv_content": csv_content, "warning": "EVENTLOG 50MB 초과"},
                 200, origin
             )
 
         # 4. PDF 다운로드
         pdf_bytes = _download_pdf(file_id, access_token)
+
+        # 4-1. 메타에 size가 없던 경우(0) 실제 바이트로 EVENTLOG 상한 재확인
+        if is_eventlog and file_size == 0 and len(pdf_bytes) > MAX_EVENTLOG_SIZE:
+            return _json_response(
+                {"status": "success",
+                 "csv_content": "﻿페이지 과도 : 검토필요\n",
+                 "warning": "EVENTLOG 50MB 초과(실측)"},
+                200, origin
+            )
 
         # 5. pdfplumber 추출
         rows = _extract_tables(pdf_bytes)
@@ -163,6 +204,12 @@ def convert_pdf(request):
                 {"status": "error", "message": f"PDF에서 데이터를 추출할 수 없습니다: {filename}"},
                 200, origin
             )
+
+        # 5-1. EVENTLOG는 Normal 노이즈 행을 제거해 CSV 크기를 줄인다
+        if is_eventlog:
+            before = len(rows)
+            rows = _filter_eventlog_noise(rows)
+            print(f"[EVENTLOG] 노이즈 필터: {before} -> {len(rows)} rows")
 
         # 6. CSV 변환
         csv_content = _rows_to_csv(rows)

@@ -32,7 +32,7 @@ gcloud functions deploy "$FUNCTION_NAME" \
   --timeout=60s \
   --concurrency=10 \
   --set-secrets="GEMINI_API_KEY=gemini-api-key:latest" \
-  --set-env-vars="RULEBOOK_VERSION=2026-05,GEMINI_MODEL=gemini-2.5-flash,FIRESTORE_PROJECT_ID=${FIRESTORE_PROJECT_ID},ALLOWED_ORIGINS=https://bwts-dashboard.web.app,https://bwts-dashboard.firebaseapp.com,https://hwjung-bit.github.io,http://localhost:5173,http://localhost:4173"
+  --set-env-vars="RULEBOOK_VERSION=2026-06,GEMINI_MODEL=gemini-2.5-flash,FIRESTORE_PROJECT_ID=${FIRESTORE_PROJECT_ID},AUTH_PROJECT_ID=${FIRESTORE_PROJECT_ID},ALLOWED_ORIGINS=https://bwts-dashboard.web.app,https://bwts-dashboard.firebaseapp.com,https://hwjung-bit.github.io,http://localhost:5173,http://localhost:4173"
 
 echo ""
 echo "✅ 배포 완료. 엔드포인트:"
