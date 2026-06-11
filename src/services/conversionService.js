@@ -11,11 +11,19 @@ import { CONFIG } from "../config.js";
  * @returns {"EVENTLOG"|"OPERATIONTIMELOG"|"DATALOG"|"TOTAL"}
  */
 export function detectLogType(pdfFileName) {
-  const name = (pdfFileName || "").toUpperCase().replace(/[\s_-]+/g, ''); // 공백/언더스코어/하이픈 제거 후 비교
-  if (name.includes("EVENTLOG") || name.includes("EVENTREPORT"))                 return "EVENTLOG";
-  if (name.includes("OPERATIONTIME") || name.includes("OPTIONTIME"))             return "OPERATIONTIMELOG";
-  if (name.includes("DATALOG") || name.includes("DATAREPORT") || name.includes("DATALOG")) return "DATALOG";
-  if (name.includes("TOTALLOG") || name.includes("TOTAL"))                       return "TOTAL";
+  // 공백/구분자/마침표 제거 후 대문자 — 파일명 표기 흔들림(오타·제조사 원본명) 흡수
+  const name = (pdfFileName || "").toUpperCase().replace(/[\s_\-.]+/g, "");
+
+  // EVENT: EVENTLOG / EVENTREPORT 등
+  if (/EVENT/.test(name)) return "EVENTLOG";
+  // OPERATION TIME: 오타 내성 — OP로 시작해 TIME으로 끝나는 변형 전부
+  //   OPERATIONTIME / OPTIONTIME(오타) / OPETATIONTIME(오타) / OPTIME / OPTIMELOG ...
+  if (/OP[A-Z]*TIME/.test(name)) return "OPERATIONTIMELOG";
+  // DATA: DATALOG / DATAREPORT 등
+  if (/DATA/.test(name)) return "DATALOG";
+  // TOTAL / 제조사 원본 합본 리포트(예: ECS_..._Report) → TOTAL로 처리
+  if (/TOTAL/.test(name) || /REPORT/.test(name)) return "TOTAL";
+
   return "TOTAL"; // 기본값
 }
 
